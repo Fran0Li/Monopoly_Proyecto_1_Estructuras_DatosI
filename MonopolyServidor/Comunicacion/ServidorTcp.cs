@@ -15,6 +15,7 @@ namespace MonopolyServidor.Comunicacion
         private readonly JsonSerializerOptions opcionesJson = new JsonSerializerOptions{
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping};
         private readonly Dado dado;
+        private StreamWriter? hardwareWriter;
 
         public ServidorTcp(int puerto)
         {
@@ -74,13 +75,17 @@ namespace MonopolyServidor.Comunicacion
                         continue;
                     }
 
-                    RespuestaMensaje respuesta = ProcesarMensaje(mensaje);
+                    RespuestaMensaje? respuesta =await ProcesarMensajeAsync(mensaje, writer);
 
-                    string jsonRespuesta = JsonSerializer.Serialize(respuesta, opcionesJson);
+                    if (respuesta != null)
+                    {
+                        string jsonRespuesta =
+                            JsonSerializer.Serialize(respuesta, opcionesJson);
 
-                    await writer.WriteLineAsync(jsonRespuesta);
+                        await writer.WriteLineAsync(jsonRespuesta);
 
-                    Console.WriteLine($"Enviado: {jsonRespuesta}");
+                        Console.WriteLine($"Enviado: {jsonRespuesta}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -94,15 +99,16 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
-        private RespuestaMensaje ProcesarMensaje(MensajeBase mensaje)
+        private async Task<RespuestaMensaje?> ProcesarMensajeAsync(MensajeBase mensaje,StreamWriter writer)
         {
             switch (mensaje.Accion)
             {
                 case Acciones.Conectar:
-                    return ProcesarConexion(mensaje);
+                    return ProcesarConexion(mensaje, writer);
 
                 case Acciones.BotonPresionado:
-                    return ProcesarBotonPresionado(mensaje);
+                    await ProcesarBotonPresionadoAsync();
+                    return null;
 
                 default:
                     return CrearError(
@@ -113,7 +119,7 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
-        private RespuestaMensaje ProcesarConexion(MensajeBase mensaje)
+        private RespuestaMensaje ProcesarConexion(MensajeBase mensaje,StreamWriter writer)
         {
             if (mensaje.Datos is JsonElement datos &&
                 datos.ValueKind == JsonValueKind.Object &&
@@ -121,7 +127,9 @@ namespace MonopolyServidor.Comunicacion
             {
                 if (tipoCliente.GetString() == "Hardware")
                 {
-                    Console.WriteLine("Hardware Raspberry conectado.");
+                    hardwareWriter = writer;
+
+                    Console.WriteLine("Hardware Raspberry registrado.");
 
                     return new RespuestaMensaje
                     {
@@ -144,27 +152,13 @@ namespace MonopolyServidor.Comunicacion
             };
         }
 
-        private RespuestaMensaje ProcesarBotonPresionado(MensajeBase mensaje)
+        private async Task ProcesarBotonPresionadoAsync()
         {
             (int valor1, int valor2) = dado.Lanzar();
 
             Console.WriteLine($"Dados lanzados: {valor1} y {valor2}");
 
-            DatosDados datosDados = new DatosDados
-            {
-                Valor1 = valor1,
-                Valor2 = valor2
-            };
-
-            return new RespuestaMensaje
-            {
-                TipoMensaje = TiposMensaje.Respuesta,
-                Accion = Acciones.BotonPresionado,
-                JugadorId = mensaje.JugadorId,
-                Exito = true,
-                Mensaje = "Tirada realizada correctamente",
-                Datos = JsonSerializer.SerializeToElement(datosDados)
-            };
+            await EnviarDadosHardwareAsync(valor1, valor2);
         }
 
 
@@ -179,6 +173,36 @@ namespace MonopolyServidor.Comunicacion
                 Mensaje = descripcion,
                 Datos = JsonSerializer.SerializeToElement(new{Codigo = codigo})
             };
+        }
+
+        private async Task EnviarDadosHardwareAsync(int valor1, int valor2)
+        {
+            if (hardwareWriter == null)
+            {
+                Console.WriteLine("No hay hardware conectado.");
+                return;
+            }
+
+            DatosDados datosDados = new DatosDados
+            {
+                Valor1 = valor1,
+                Valor2 = valor2
+            };
+
+            MensajeBase notificacion = new MensajeBase
+            {
+                TipoMensaje = TiposMensaje.Notificacion,
+                Accion = Acciones.MostrarDado,
+                JugadorId = null,
+                Datos = JsonSerializer.SerializeToElement(datosDados)
+            };
+
+            string json =
+                JsonSerializer.Serialize(notificacion, opcionesJson);
+
+            await hardwareWriter.WriteLineAsync(json);
+
+            Console.WriteLine($"Enviado a Raspberry: {json}");
         }
 
     }
