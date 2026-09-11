@@ -4,13 +4,15 @@ import time
 import ujson
 from machine import Pin
 
-# CONFIGURACIÓN — EDITAR ANTES DE CORRER
+
+# CONFIGURACIÓN 
 
 WIFI_SSID = "NOMBRE_DEL_HOTSPOT"
 WIFI_PASSWORD = "CONTRASEÑA_HOTSPOT"
 
 SERVIDOR_IP = "192.168.1.100"   #  cambia esto cada vez que reinicien el hotspot
-SERVIDOR_PUERTO = 5000           #  confirmar con el chat de Servidor
+SERVIDOR_PUERTO = 5000           # confirmar puerto real con Persona A
+
 
 # CONEXIÓN WIFI
 
@@ -33,6 +35,7 @@ def conectar_wifi():
         print("\nNo se pudo conectar al WiFi.")
         return False
 
+
 # CONEXIÓN TCP AL SERVIDOR
 
 def conectar_servidor():
@@ -52,6 +55,7 @@ def enviar_mensaje(sock, mensaje_dict):
     texto = ujson.dumps(mensaje_dict) + "\n"
     sock.send(texto.encode("utf-8"))
     print("Enviado:", texto.strip())
+
 
 # DISPLAYS DE 7 SEGMENTOS
 
@@ -86,31 +90,68 @@ def apagar_display(segmentos):
     for pin in segmentos.values():
         pin.value(0)
 
-# RFID 
+def parpadear_espera_rfid():
+    # Feedback visual simple mientras el servidor espera que acerquemos
+    # una tarjeta para vincular (Accion: ESPERAR_RFID). No bloquea el
+    # loop principal por mucho tiempo -- solo un parpadeo cortito.
+    for _ in range(3):
+        mostrar_numero(segmentos_1, 1)
+        mostrar_numero(segmentos_2, 1)
+        time.sleep_ms(150)
+        apagar_display(segmentos_1)
+        apagar_display(segmentos_2)
+        time.sleep_ms(150)
+
+
+# RFID — DESCOMENTAR CUANDO EL RC522 ESTÉ RESOLDADO Y FUNCIONANDO
+# (recordar: probar primero con _rreg(0x37) que devuelva 0x91/0x92
+# antes de confiar en esta parte)
 
 # from mfrc522 import MFRC522
 # lector = MFRC522(sck=18, mosi=19, miso=16, rst=20, cs=17)
 #
+# ultimo_uid_enviado = None
+#
 # def revisar_rfid(sock):
+#     global ultimo_uid_enviado
 #     (estado, tag_type) = lector.request(lector.REQIDL)
 #     if estado == lector.OK:
 #         (estado, uid_bytes) = lector.SelectTagSN()
 #         if estado == lector.OK:
 #             uid_str = ":".join("{:02X}".format(b) for b in uid_bytes)
-#             print("Tarjeta detectada. UID:", uid_str)
-#             mensaje = {
-#                 "TipoMensaje": "Peticion",
-#                 "Accion": "RFID_DETECTADO",
-#                 "Datos": {"UID": uid_str}
-#             }
-#             enviar_mensaje(sock, mensaje)
+#             if uid_str != ultimo_uid_enviado:
+#                 print("Tarjeta detectada. UID:", uid_str)
+#                 mensaje = {
+#                     "TipoMensaje": "Peticion",
+#                     "Accion": "RFID_DETECTADO",
+#                     "Datos": {"UID": uid_str}
+#                 }
+#                 enviar_mensaje(sock, mensaje)
+#                 ultimo_uid_enviado = uid_str
+#     else:
+#         ultimo_uid_enviado = None
 
 
-# BOTÓN (por ahora solo para pruebas locales, NO forma parte
-# todavía del protocolo oficial -- pendiente de confirmar con
-# el chat de Servidor si debe disparar TIRAR_DADOS)
+# BOTÓN — ahora sí forma parte del protocolo real:
+# dispara BOTON_PRESIONADO, el servidor decide de quién es el
+# turno (ColaCircular.Actual()) y tira los dados él mismo.
 
 boton = Pin(9, Pin.IN, Pin.PULL_DOWN)
+boton_presionado_antes = False
+
+def revisar_boton(sock):
+    global boton_presionado_antes
+    presionado_ahora = boton.value() == 1
+
+    if presionado_ahora and not boton_presionado_antes:
+        mensaje = {
+            "TipoMensaje": "Peticion",
+            "Accion": "BOTON_PRESIONADO",
+            "Datos": {}
+        }
+        enviar_mensaje(sock, mensaje)
+
+    boton_presionado_antes = presionado_ahora
 
 
 # MANEJO DE MENSAJES ENTRANTES (buffer NDJSON)
@@ -147,6 +188,15 @@ def procesar_mensaje(linea_bytes):
         print("Servidor pidió mostrar dado:", valor1, valor2)
         mostrar_numero(segmentos_1, valor1)
         mostrar_numero(segmentos_2, valor2)
+
+    elif accion == "ESPERAR_RFID":
+        print("Servidor pidió esperar tarjeta para vincular...")
+        parpadear_espera_rfid()
+        # A partir de aquí, la próxima lectura de RFID_DETECTADO
+        # que mandemos, el servidor la va a interpretar como la
+        # vinculación pendiente -- la Pico no necesita saber nada
+        # de esto, solo sigue leyendo tarjetas como siempre.
+
     else:
         print("Mensaje recibido, acción no manejada:", accion)
 
@@ -165,7 +215,8 @@ def main():
 
     while True:
         revisar_mensajes_servidor(sock)
-        # revisar_rfid(sock)   # <-- descomentar cuando el RC522 esté listo
+        revisar_boton(sock)
+        # revisar_rfid(sock)   # descomentar cuando el RC522 esté listo
 
         time.sleep_ms(100)
 
