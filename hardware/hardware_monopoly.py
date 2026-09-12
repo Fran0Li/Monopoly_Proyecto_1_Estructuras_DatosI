@@ -10,14 +10,14 @@ from machine import Pin
 WIFI_SSID = "NOMBRE_DEL_HOTSPOT"
 WIFI_PASSWORD = "CONTRASEÑA_HOTSPOT"
 
-SERVIDOR_IP = "192.168.1.100"   #  cambia esto cada vez que reinicien el hotspot
-SERVIDOR_PUERTO = 5000           # confirmar puerto real con Persona A
+SERVIDOR_IP = "192.168.1.100"   #  cambiar para las pruebas
+SERVIDOR_PUERTO = 5000           # puerto correcto
 
 
 # CONEXIÓN WIFI
 
 def conectar_wifi():
-    wlan = network.WLAN(network.STA_IF)
+    wlan = network.WLAN(network.STA_IF) # Raspy se conecta a la red, no crea una
     wlan.active(True)
     wlan.connect(WIFI_SSID, WIFI_PASSWORD)
 
@@ -31,7 +31,7 @@ def conectar_wifi():
     if wlan.isconnected():
         print("\nWiFi conectado. IP local:", wlan.ifconfig()[0])
         return True
-    else:
+    else: #Se acaban los intentos a los 20 segs sin conectar
         print("\nNo se pudo conectar al WiFi.")
         return False
 
@@ -39,11 +39,11 @@ def conectar_wifi():
 # CONEXIÓN TCP AL SERVIDOR
 
 def conectar_servidor():
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)# Socket TCP normal, igual a tcpClient en c sharp por parte del server
     s.connect((SERVIDOR_IP, SERVIDOR_PUERTO))
     print("Conectado al servidor", SERVIDOR_IP, ":", SERVIDOR_PUERTO)
 
-    mensaje_conectar = {
+    mensaje_conectar = { #Avisa al serve que la conexion es de la raspy no un jugador, para no meterla en la cola de turnos
         "TipoMensaje": "Peticion",
         "Accion": "CONECTAR",
         "Datos": {"TipoCliente": "Hardware"}
@@ -52,6 +52,8 @@ def conectar_servidor():
     return s
 
 def enviar_mensaje(sock, mensaje_dict):
+    # NDJSON: el mensaje va como JSON de una sola línea, terminado en \n,
+    # para que el servidor sepa dónde termina un mensaje y empieza el siguiente
     texto = ujson.dumps(mensaje_dict) + "\n"
     sock.send(texto.encode("utf-8"))
     print("Enviado:", texto.strip())
@@ -81,9 +83,9 @@ DIGITOS = {
 }
 
 def mostrar_numero(segmentos, n):
-    for pin in segmentos.values():
+    for pin in segmentos.values():#Apaga todo primero 
         pin.value(0)
-    for letra in DIGITOS.get(n, []):
+    for letra in DIGITOS.get(n, []):#Prende solo los que formen el numero
         segmentos[letra].value(1)
 
 def apagar_display(segmentos):
@@ -137,12 +139,12 @@ def parpadear_espera_rfid():
 # turno (ColaCircular.Actual()) y tira los dados él mismo.
 
 boton = Pin(9, Pin.IN, Pin.PULL_DOWN)
-boton_presionado_antes = False
+boton_presionado_antes = False #guarda estado anterior para detectar
 
 def revisar_boton(sock):
     global boton_presionado_antes
     presionado_ahora = boton.value() == 1
-
+    #Solo manda el mensaje en el instante que pasa de no presionado a presionado.
     if presionado_ahora and not boton_presionado_antes:
         mensaje = {
             "TipoMensaje": "Peticion",
@@ -156,7 +158,7 @@ def revisar_boton(sock):
 
 # MANEJO DE MENSAJES ENTRANTES (buffer NDJSON)
 
-buffer_entrada = b""
+buffer_entrada = b"" # acumula bytes hasta encontrar un /n completo
 
 def revisar_mensajes_servidor(sock):
     global buffer_entrada
@@ -165,6 +167,8 @@ def revisar_mensajes_servidor(sock):
         datos = sock.recv(1024)
         if datos:
             buffer_entrada += datos
+            # Puede llegar más de un mensaje pegado en un solo recv(),
+            # por eso el while: procesa todos los \n completos que haya
             while b"\n" in buffer_entrada:
                 linea, buffer_entrada = buffer_entrada.split(b"\n", 1)
                 if linea.strip():
@@ -181,7 +185,7 @@ def procesar_mensaje(linea_bytes):
 
     accion = mensaje.get("Accion")
 
-    if accion == "MOSTRAR_DADO":
+    if accion == "MOSTRAR_DADO": # Raspy solo muestra, el numero lo genera el server 
         datos = mensaje.get("Datos", {})
         valor1 = datos.get("Valor1")
         valor2 = datos.get("Valor2")
@@ -194,7 +198,7 @@ def procesar_mensaje(linea_bytes):
         parpadear_espera_rfid()
         # A partir de aquí, la próxima lectura de RFID_DETECTADO
         # que mandemos, el servidor la va a interpretar como la
-        # vinculación pendiente -- la Pico no necesita saber nada
+        # vinculación pendiente la Pico no necesita saber nada
         # de esto, solo sigue leyendo tarjetas como siempre.
 
     else:
@@ -205,14 +209,14 @@ def procesar_mensaje(linea_bytes):
 
 def main():
     if not conectar_wifi():
-        return
+        return 
 
     sock = conectar_servidor()
     apagar_display(segmentos_1)
     apagar_display(segmentos_2)
 
     print("Listo. Esperando mensajes del servidor...")
-
+    
     while True:
         revisar_mensajes_servidor(sock)
         revisar_boton(sock)
