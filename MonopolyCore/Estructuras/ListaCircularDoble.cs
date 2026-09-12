@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-
+namespace MonopolyCore.Estructuras {
 public class ListaCircularDoble<T>
 {
     private NodoDoble<T>? cabeza; //cabeza de la lista
@@ -21,7 +21,7 @@ public class ListaCircularDoble<T>
         }
         else //si no
         {
-            var ultimo = cabeza.Anterior; //obtiene el ultimo nodo agarrando el anterior de la cabeza
+            var ultimo = cabeza.Anterior!; //obtiene el ultimo nodo agarrando el anterior de la cabeza
             ultimo.Siguiente = nuevo; //hace que el ultimo nodo apunte al nuevo nodo como siguiente 
             nuevo.Anterior = ultimo; //hace que el nuevo nodo apunte al ultimo nodo como anterior
             nuevo.Siguiente = cabeza; //indica que el nuevo nodo apuntará a la cabeza como siguiente
@@ -39,7 +39,7 @@ public class ListaCircularDoble<T>
         int pos = ((indice%cantidad) + cantidad) % cantidad; //calcula la posicion real del nodo a obtener
             var actual = cabeza; //inicia desde la cabeza de la lista
             for (int i = 0; i < pos; i++) //recorre la lista hasta llegar a la posicion deseada
-            actual = actual.Siguiente; //avanza al siguiente nodo
+            actual = actual.Siguiente!; //avanza al siguiente nodo
 
             return actual; //devuelve el nodo en la posicion deseada
 
@@ -51,12 +51,12 @@ public class ListaCircularDoble<T>
 
     public NodoDoble<T> Siguiente(NodoDoble<T> nodoActual)
     {
-        return nodoActual.Siguiente; //devuelve el nodo siguiente al nodo actual
+        return nodoActual.Siguiente!; //devuelve el nodo siguiente al nodo actual
     
     }
     public NodoDoble<T> Anterior(NodoDoble<T> nodoActual)
     {
-        return nodoActual.Anterior;//devuelve el nodo que esta antes del actual
+        return nodoActual.Anterior!;//devuelve el nodo que esta antes del actual
     }
     public IEnumerable<T> Recorrer()
     {
@@ -66,10 +66,11 @@ public class ListaCircularDoble<T>
         do
         {
             yield return actual.Valor; //devuelve el valor del nodo actual
-            actual = actual.Siguiente; //avanza al nodo que sigue
+            actual = actual.Siguiente!; //avanza al nodo que sigue
 
         }   while (actual != cabeza); //siempre y cuando el nodo actual no sea la cabeza, si si es la cabeza
     }
 
 
+}
 }

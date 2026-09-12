@@ -1,7 +1,8 @@
-class Jugador
+namespace MonopolyCore.Modelos{
+public class Jugador
 {
     //Identificacion
-    public int Id;
+    private int Id;
     public string Nombre;
     public string TarjetaRfid;
     //Estados
@@ -30,4 +31,5 @@ class Jugador
         this.PosicionActual += 1;
         Console.WriteLine($"El jugador {this.Nombre}, ahora esta en la casilla {this.PosicionActual}");
     }
+}
 }

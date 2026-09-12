@@ -1,3 +1,5 @@
+using MonopolyCore.Estructuras;
+namespace MonopolyCore.Modelos {
 public class Tablero
 {
     private ListaCircularDoble<Casilla> casillas; //lista circular doble de casillas que representa el tablero
@@ -28,4 +30,5 @@ public class Tablero
     {
         return posicionNueva < posicionAnterior;
     }
+}
 }

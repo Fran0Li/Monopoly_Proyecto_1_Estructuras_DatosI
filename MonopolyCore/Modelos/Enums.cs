@@ -1,3 +1,4 @@
+namespace MonopolyCore.Modelos {
 public enum TipoCasilla
 {
     Propiedad,
@@ -38,4 +39,5 @@ public enum EstadoJuego
     Esperando,
     EnCurso,
     Finalizado
+}
 }

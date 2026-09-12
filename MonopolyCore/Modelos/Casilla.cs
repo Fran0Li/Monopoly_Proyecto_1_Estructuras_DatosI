@@ -1,3 +1,4 @@
+namespace MonopolyCore.Modelos {
 public abstract class Casilla
 {
     private int id; //identificador unico de la casilla
@@ -37,4 +38,5 @@ public abstract class Casilla
         this.tipo = tipo;
     }
 
+}
 }

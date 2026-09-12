@@ -1,3 +1,4 @@
+namespace MonopolyCore.Modelos {
 public class CasillaEspecial : Casilla
 {
     private TipoCasillaEspecial tipoespecial;
@@ -12,4 +13,5 @@ public class CasillaEspecial : Casilla
     {
         this.tipoespecial = tipoespecial;
     }
+}
 }

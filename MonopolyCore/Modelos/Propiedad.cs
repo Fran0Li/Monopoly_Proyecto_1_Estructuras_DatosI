@@ -1,3 +1,4 @@
+namespace MonopolyCore.Modelos {
 public class Propiedad : Casilla
 {
     private int precio; //precio de la propiedad
@@ -49,4 +50,5 @@ public class Propiedad : Casilla
         return alquiler;
 
     }
+}
 }
