@@ -1,12 +1,14 @@
 class Jugador
 {
+    //Identificacion
     public int Id;
     public string Nombre;
+    public string TarjetaRfid;
+    //Estados
     public int Saldo;
     public int PosicionActual;
     public bool Activo;
-    //public propiedades;
-    public string TarjetaRfid;
+    //public propiedades; #Aun no listo porque no se como hacer la estructura de datos
     public int TurnosEnCarcel;
 
     public Jugador(int Id, string Nombre)
