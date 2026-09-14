@@ -1,4 +1,4 @@
-﻿namespace MonopolyCore.Estructuras
+﻿namespace MonopolyCore.Estructuras 
 {
     public class ColaCircular<T>
     {
