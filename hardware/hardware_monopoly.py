@@ -103,33 +103,34 @@ def parpadear_espera_rfid():
         time.sleep_ms(150)
 
 
-# RFID — DESCOMENTAR CUANDO EL RC522 ESTÉ RESOLDADO Y FUNCIONANDO
+# RFID 
 # (recordar: probar primero con _rreg(0x37) que devuelva 0x91/0x92
 # antes de confiar en esta parte)
 
-# from mfrc522 import MFRC522
-# lector = MFRC522(sck=18, mosi=19, miso=16, rst=20, cs=17)
-#
-# ultimo_uid_enviado = None
-#
-# def revisar_rfid(sock):
-#     global ultimo_uid_enviado
-#     (estado, tag_type) = lector.request(lector.REQIDL)
-#     if estado == lector.OK:
-#         (estado, uid_bytes) = lector.SelectTagSN()
-#         if estado == lector.OK:
-#             uid_str = ":".join("{:02X}".format(b) for b in uid_bytes)
-#             if uid_str != ultimo_uid_enviado:
-#                 print("Tarjeta detectada. UID:", uid_str)
-#                 mensaje = {
-#                     "TipoMensaje": "Peticion",
-#                     "Accion": "RFID_DETECTADO",
-#                     "Datos": {"UID": uid_str}
-#                 }
-#                 enviar_mensaje(sock, mensaje)
-#                 ultimo_uid_enviado = uid_str
-#     else:
-#         ultimo_uid_enviado = None
+
+from mfrc522 import MFRC522
+lector = MFRC522(sck=18, mosi=19, miso=16, rst=20, cs=17)
+
+ultimo_uid_enviado = None
+
+def revisar_rfid(sock):
+    global ultimo_uid_enviado
+    (estado, tag_type) = lector.request(lector.REQIDL)
+    if estado == lector.OK:
+        (estado, uid_bytes) = lector.SelectTagSN()
+        if estado == lector.OK:
+            uid_str = ":".join("{:02X}".format(b) for b in uid_bytes)
+            if uid_str != ultimo_uid_enviado:
+                print("Tarjeta detectada. UID:", uid_str)
+                mensaje = {
+                    "TipoMensaje": "Peticion",
+                    "Accion": "RFID_DETECTADO",
+                    "Datos": {"UID": uid_str}
+                }
+                enviar_mensaje(sock, mensaje)
+                ultimo_uid_enviado = uid_str
+    else:
+        ultimo_uid_enviado = None
 
 
 # BOTÓN — ahora sí forma parte del protocolo real:
