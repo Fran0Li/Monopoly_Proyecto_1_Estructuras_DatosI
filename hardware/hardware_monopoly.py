@@ -108,6 +108,8 @@ def parpadear_espera_rfid():
 # RFID 
 # (recordar: probar primero con _rreg(0x37) que devuelva 0x91/0x92
 # antes de confiar en esta parte)
+#Llavero detectado. UID: 05:FF:21:07
+#Tarjeta detectada. UID: 8D:70:F6:06
 
 
 from mfrc522 import MFRC522
