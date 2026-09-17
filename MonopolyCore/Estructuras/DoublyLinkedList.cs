@@ -1,5 +1,6 @@
 namespace MonopolyCore.Estructuras {
-class ListaDoblementeEnlazada<T>
+
+public class ListaDoblementeEnlazada<T>
 {
     private NodoDoble<T>? cabeza;
     private NodoDoble<T>? cola;
