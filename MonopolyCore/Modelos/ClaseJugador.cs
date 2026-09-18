@@ -3,14 +3,50 @@ public class Jugador
 {
     //Identificacion
     private int Id;
-    public string Nombre;
-    public string TarjetaRfid;
+    private string Nombre;
+    private string TarjetaRfid;
     //Estados
-    public int Saldo;
-    public int PosicionActual;
-    public bool Activo;
+    private int Saldo;
+    private int PosicionActual;
+    private bool Activo;
     //public propiedades; #Aun no listo porque no se como hacer la estructura de datos
-    public int TurnosEnCarcel;
+    private int TurnosEnCarcel;
+
+    public int id
+        {
+            get {return Id;}
+            set {Id = value;}
+        }
+    public string nombre
+        {
+            get {return Nombre;}
+            set {Nombre = value;}
+        }
+    public string tarjetaRfid
+        {
+            get {return TarjetaRfid;}
+            set {TarjetaRfid= value;}
+        }
+    public int saldo
+        {
+            get {return Saldo;}
+            set {Saldo = value;}
+        }
+    public int posicionActual
+        {
+            get {return Saldo;}
+            set {Saldo = value;}
+        }
+    public bool activo
+        {
+            get {return Activo;}
+            set {Activo = value;}
+        }
+    public int turnosEnCarcel
+        {
+            get {return TurnosEnCarcel;}
+            set {TurnosEnCarcel = value;}
+        }
 
     public Jugador(int Id, string Nombre)
     {
