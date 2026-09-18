@@ -1,3 +1,5 @@
+using MonopolyCore.Estructuras;
+
 namespace MonopolyCore.Modelos{
 public class Jugador
 {
@@ -9,7 +11,7 @@ public class Jugador
     private int Saldo;
     private int PosicionActual;
     private bool Activo;
-    //public propiedades; #Aun no listo porque no se como hacer la estructura de datos
+    private ListaDoblementeEnlazada<Propiedad> Propiedades; 
     private int TurnosEnCarcel;
 
     public int id
@@ -56,16 +58,25 @@ public class Jugador
         this.PosicionActual = 1;
         this.Activo = false;
         this.TarjetaRfid = "1";
+        this.Propiedades = new ListaDoblementeEnlazada<Propiedad>();
         this.TurnosEnCarcel = 0;
     }
     public int PatrimonioTotal()
     {
-        return this.Saldo;
+        int patrimonio = this.Saldo;
+        foreach (Propiedad propiedad in Propiedades.RecorrerDesdeInicio())
+            {
+                patrimonio += propiedad.Precio;
+            }
+        return patrimonio;
     }
     public void AvanzarCasilla()
     {
         this.PosicionActual += 1;
-        Console.WriteLine($"El jugador {this.Nombre}, ahora esta en la casilla {this.PosicionActual}");
+    }
+    public void AgregarPropiedad(Propiedad propiedad)
+    {
+        Propiedades.AgregarAlFinal(propiedad);
     }
 }
 }
