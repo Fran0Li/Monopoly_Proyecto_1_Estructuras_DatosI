@@ -30,6 +30,8 @@ namespace MonopolyServidor.Comunicacion
 
         private StreamWriter? hardwareWriter;
 
+        private int? jugadorPendienteRfid;
+
         public ServidorTcp(int puerto)
         {
             this.puerto = puerto;
@@ -46,6 +48,8 @@ namespace MonopolyServidor.Comunicacion
             turnosInicializados = false;
 
             random = new Random();
+
+            jugadorPendienteRfid = null;
         }
 
         public async Task IniciarAsync()
@@ -128,12 +132,15 @@ namespace MonopolyServidor.Comunicacion
                 case Acciones.Conectar:
                     return ProcesarConexion(mensaje, writer);
 
+                case Acciones.VincularRfid:
+                    return await ProcesarVincularRfidAsync(mensaje);
+
+                case Acciones.RfidDetectado:
+                    return await ProcesarRfidDetectadoAsync(mensaje);
+
                 case Acciones.BotonPresionado:
                     await ProcesarBotonPresionadoAsync();
                     return null;
-
-                case Acciones.RfidDetectado:
-                    return ProcesarRfidDetectado(mensaje);
 
                 default:
                     return CrearError(
@@ -324,16 +331,97 @@ namespace MonopolyServidor.Comunicacion
             Console.WriteLine();
         }
 
-        private async Task ProcesarBotonPresionadoAsync()
+        private async Task<RespuestaMensaje> ProcesarVincularRfidAsync(MensajeBase mensaje)
         {
-            (int valor1, int valor2) = dado.Lanzar();
+            if (!mensaje.JugadorId.HasValue)
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.JugadorNoEncontrado,
+                    "No se recibió el ID del jugador."
+                );
+            }
 
-            Console.WriteLine($"Dados lanzados: {valor1} y {valor2}");
+            int jugadorId = mensaje.JugadorId.Value;
 
-            await EnviarDadosHardwareAsync(valor1, valor2);
+            if (jugadorId < 1 || jugadorId > MaxJugadores)
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.JugadorNoEncontrado,
+                    "El jugador indicado no existe."
+                );
+            }
+
+            Jugador? jugador = jugadoresRegistrados[jugadorId - 1];
+
+            if (jugador == null)
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.JugadorNoEncontrado,
+                    "El jugador no está registrado."
+                );
+            }
+
+            if (hardwareWriter == null)
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.AccionInvalida,
+                    "No hay hardware RFID conectado."
+                );
+            }
+
+            if (jugadorPendienteRfid.HasValue)
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.AccionInvalida,
+                    "Ya existe un jugador esperando vincular una tarjeta RFID."
+                );
+            }
+
+            jugadorPendienteRfid = jugadorId;
+
+            await EnviarEsperarRfidHardwareAsync(jugadorId);
+
+            Console.WriteLine(
+                $"Jugador {jugador.Nombre} esperando vinculación RFID."
+            );
+
+            return new RespuestaMensaje
+            {
+                TipoMensaje = TiposMensaje.Respuesta,
+                Accion = Acciones.VincularRfid,
+                JugadorId = jugadorId,
+                Exito = true,
+                Mensaje = "Acerque una tarjeta al lector RFID."
+            };
         }
 
-        private RespuestaMensaje ProcesarRfidDetectado(MensajeBase mensaje)
+        private async Task EnviarEsperarRfidHardwareAsync(int jugadorId)
+        {
+            if (hardwareWriter == null)
+            {
+                return;
+            }
+
+            MensajeBase mensaje = new MensajeBase
+            {
+                TipoMensaje = TiposMensaje.Notificacion,
+                Accion = Acciones.EsperarRfid,
+                JugadorId = jugadorId
+            };
+
+            string json = JsonSerializer.Serialize(mensaje, opcionesJson);
+
+            await hardwareWriter.WriteLineAsync(json);
+
+            Console.WriteLine($"Servidor esperando RFID para jugador {jugadorId}.");
+        }
+
+        private async Task<RespuestaMensaje> ProcesarRfidDetectadoAsync(MensajeBase mensaje)
         {
             if (mensaje.Datos is not JsonElement datos)
             {
@@ -355,16 +443,109 @@ namespace MonopolyServidor.Comunicacion
                 );
             }
 
-            Console.WriteLine($"RFID detectado: {datosRfid.UID}");
+            string uid = datosRfid.UID;
+
+            Console.WriteLine($"RFID detectado: {uid}");
+
+            // Si nadie está intentando vincular una tarjeta,
+            // solamente reconocemos el RFID.
+            if (!jugadorPendienteRfid.HasValue)
+            {
+                return new RespuestaMensaje
+                {
+                    TipoMensaje = TiposMensaje.Respuesta,
+                    Accion = Acciones.RfidDetectado,
+                    JugadorId = null,
+                    Exito = true,
+                    Mensaje = $"RFID detectado: {uid}"
+                };
+            }
+
+            // Verificar que esa tarjeta no pertenezca ya
+            // a otro jugador.
+            for (int i = 0; i < cantidadJugadores; i++)
+            {
+                Jugador? registrado = jugadoresRegistrados[i];
+
+                if (registrado != null && registrado.TarjetaRfid == uid && registrado != jugadoresRegistrados[jugadorPendienteRfid.Value - 1])
+                {
+                    return CrearError(
+                        mensaje,
+                        CodigosError.AccionInvalida,
+                        "Esta tarjeta RFID ya está vinculada a otro jugador."
+                    );
+                }
+            }
+
+            int jugadorId = jugadorPendienteRfid.Value;
+
+            Jugador? jugador = jugadoresRegistrados[jugadorId - 1];
+
+            if (jugador == null)
+            {
+                jugadorPendienteRfid = null;
+
+                return CrearError(
+                    mensaje,
+                    CodigosError.JugadorNoEncontrado,
+                    "No se encontró el jugador pendiente de vinculación."
+                );
+            }
+
+            // Vinculación.
+            jugador.TarjetaRfid = uid;
+
+            jugadorPendienteRfid = null;
+
+            Console.WriteLine($"RFID {uid} vinculado al jugador " + $"{jugador.Nombre} (ID {jugadorId}).");
+
+            await NotificarRfidVinculadoAsync(jugadorId,uid);
 
             return new RespuestaMensaje
             {
                 TipoMensaje = TiposMensaje.Respuesta,
                 Accion = Acciones.RfidDetectado,
-                JugadorId = null,
+                JugadorId = jugadorId,
                 Exito = true,
-                Mensaje = $"RFID recibido correctamente: {datosRfid.UID}"
+                Mensaje = $"RFID vinculado correctamente al jugador {jugador.Nombre}."
             };
+        }
+
+        private async Task NotificarRfidVinculadoAsync(int jugadorId,string uid)
+        {
+            StreamWriter? writer = conexionesJugadores[jugadorId - 1];
+
+            if (writer == null)
+            {
+                return;
+            }
+
+            DatosRfid datosRfid = new DatosRfid
+            {
+                UID = uid
+            };
+
+            MensajeBase notificacion = new MensajeBase
+            {
+                TipoMensaje = TiposMensaje.Notificacion,
+                Accion = Acciones.RfidVinculado,
+                JugadorId = jugadorId,
+                Datos = JsonSerializer.SerializeToElement(datosRfid)
+            };
+
+            string json = JsonSerializer.Serialize(notificacion,opcionesJson);
+
+            await writer.WriteLineAsync(json);
+
+            Console.WriteLine($"Jugador {jugadorId} notificado de su RFID.");}
+
+        private async Task ProcesarBotonPresionadoAsync()
+        {
+            (int valor1, int valor2) = dado.Lanzar();
+
+            Console.WriteLine($"Dados lanzados: {valor1} y {valor2}");
+
+            await EnviarDadosHardwareAsync(valor1, valor2);
         }
 
         private RespuestaMensaje CrearError(MensajeBase mensaje,string codigo,string descripcion)
