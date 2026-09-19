@@ -110,6 +110,9 @@ namespace MonopolyServidor.Comunicacion
                     await ProcesarBotonPresionadoAsync();
                     return null;
 
+                case Acciones.RfidDetectado:
+                    return ProcesarRfidDetectado(mensaje);
+
                 default:
                     return CrearError(
                         mensaje,
@@ -161,6 +164,39 @@ namespace MonopolyServidor.Comunicacion
             await EnviarDadosHardwareAsync(valor1, valor2);
         }
 
+        private RespuestaMensaje ProcesarRfidDetectado(MensajeBase mensaje)
+        {
+            if (mensaje.Datos is not JsonElement datos)
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.AccionInvalida,
+                    "No se recibieron datos del RFID."
+                );
+            }
+
+            DatosRfid? datosRfid = JsonSerializer.Deserialize<DatosRfid>(datos.GetRawText());
+
+            if (datosRfid == null || string.IsNullOrWhiteSpace(datosRfid.UID))
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.AccionInvalida,
+                    "El UID recibido no es válido."
+                );
+            }
+
+            Console.WriteLine($"RFID detectado: {datosRfid.UID}");
+
+            return new RespuestaMensaje
+            {
+                TipoMensaje = TiposMensaje.Respuesta,
+                Accion = Acciones.RfidDetectado,
+                JugadorId = null,
+                Exito = true,
+                Mensaje = $"RFID recibido correctamente: {datosRfid.UID}"
+            };
+        }
 
         private RespuestaMensaje CrearError(MensajeBase mensaje,string codigo,string descripcion)
         {
