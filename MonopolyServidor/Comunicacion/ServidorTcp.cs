@@ -1,10 +1,11 @@
-﻿using System.Net;
+﻿using MonopolyCore.Comunicacion;
+using MonopolyCore.Estructuras;
+using MonopolyCore.Modelos;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using MonopolyCore.Comunicacion;
-using MonopolyCore.Modelos;
 
 namespace MonopolyServidor.Comunicacion
 {
@@ -15,13 +16,36 @@ namespace MonopolyServidor.Comunicacion
         private readonly JsonSerializerOptions opcionesJson = new JsonSerializerOptions{
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping};
         private readonly Dado dado;
+        private const int MaxJugadores = 4;
+
+        private readonly Jugador?[] jugadoresRegistrados;
+        private readonly StreamWriter?[] conexionesJugadores;
+
+        private readonly ColaCircular<Jugador> turnos;
+
+        private int cantidadJugadores;
+        private bool turnosInicializados;
+
+        private readonly Random random;
+
         private StreamWriter? hardwareWriter;
 
         public ServidorTcp(int puerto)
         {
             this.puerto = puerto;
             listener = new TcpListener(IPAddress.Any, puerto);
+
             dado = new Dado();
+
+            jugadoresRegistrados = new Jugador?[MaxJugadores];
+            conexionesJugadores = new StreamWriter?[MaxJugadores];
+
+            turnos = new ColaCircular<Jugador>();
+
+            cantidadJugadores = 0;
+            turnosInicializados = false;
+
+            random = new Random();
         }
 
         public async Task IniciarAsync()
@@ -47,11 +71,9 @@ namespace MonopolyServidor.Comunicacion
             {
                 using NetworkStream stream = cliente.GetStream();
 
-                using StreamReader reader =
-                    new StreamReader(stream, Encoding.UTF8);
+                using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
 
-                using StreamWriter writer =
-                    new StreamWriter(stream, Encoding.UTF8)
+                using StreamWriter writer = new StreamWriter(stream, Encoding.UTF8)
                     {
                         AutoFlush = true
                     };
@@ -124,6 +146,7 @@ namespace MonopolyServidor.Comunicacion
 
         private RespuestaMensaje ProcesarConexion(MensajeBase mensaje,StreamWriter writer)
         {
+            // ¿Es la Raspberry?
             if (mensaje.Datos is JsonElement datos &&
                 datos.ValueKind == JsonValueKind.Object &&
                 datos.TryGetProperty("TipoCliente", out JsonElement tipoCliente))
@@ -145,14 +168,160 @@ namespace MonopolyServidor.Comunicacion
                 }
             }
 
+            // Si trae JugadorId, intentamos reconectarlo
+            if (mensaje.JugadorId.HasValue)
+            {
+                return ProcesarReconexionJugador(
+                    mensaje.JugadorId.Value,
+                    writer
+                );
+            }
+
+            // Si no trae ID es un jugador nuevo
+            return RegistrarJugador(mensaje, writer);
+        }
+
+        private RespuestaMensaje RegistrarJugador(MensajeBase mensaje,StreamWriter writer)
+        {
+            if (cantidadJugadores >= MaxJugadores)
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.AccionInvalida,
+                    "La partida ya tiene 4 jugadores."
+                );
+            }
+
+            if (mensaje.Datos is not JsonElement datos || !datos.TryGetProperty("Nombre", out JsonElement nombreElemento))
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.AccionInvalida,
+                    "No se recibió el nombre del jugador."
+                );
+            }
+
+            string? nombre = nombreElemento.GetString();
+
+            if (string.IsNullOrWhiteSpace(nombre))
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.AccionInvalida,
+                    "El nombre del jugador no es válido."
+                );
+            }
+
+            int nuevoId = cantidadJugadores + 1;
+
+            Jugador jugador = new Jugador(nuevoId, nombre);
+
+            jugadoresRegistrados[nuevoId - 1] = jugador;
+            conexionesJugadores[nuevoId - 1] = writer;
+
+            cantidadJugadores++;
+
+            Console.WriteLine($"Jugador registrado: {nombre} - ID: {nuevoId}");
+
+            if (cantidadJugadores == MaxJugadores)
+            {
+                RifarlosYCrearTurnos();
+            }
+
             return new RespuestaMensaje
             {
                 TipoMensaje = TiposMensaje.Respuesta,
                 Accion = Acciones.Conectar,
-                JugadorId = mensaje.JugadorId,
+                JugadorId = nuevoId,
                 Exito = true,
-                Mensaje = "Cliente conectado correctamente"
+                Mensaje = $"Jugador {nombre} registrado correctamente. ID: {nuevoId}"
             };
+        }
+
+        private RespuestaMensaje ProcesarReconexionJugador(int jugadorId,StreamWriter writer)
+        {
+            if (jugadorId < 1 || jugadorId > MaxJugadores)
+            {
+                return new RespuestaMensaje
+                {
+                    TipoMensaje = TiposMensaje.Respuesta,
+                    Accion = Acciones.Conectar,
+                    JugadorId = jugadorId,
+                    Exito = false,
+                    Mensaje = "El jugador indicado no existe."
+                };
+            }
+
+            Jugador? jugador = jugadoresRegistrados[jugadorId - 1];
+
+            if (jugador == null)
+            {
+                return new RespuestaMensaje
+                {
+                    TipoMensaje = TiposMensaje.Respuesta,
+                    Accion = Acciones.Conectar,
+                    JugadorId = jugadorId,
+                    Exito = false,
+                    Mensaje = "El jugador indicado no está registrado."
+                };
+            }
+
+            // Sustituimos el socket viejo por el nuevo
+            conexionesJugadores[jugadorId - 1] = writer;
+
+            Console.WriteLine($"Jugador reconectado: {jugador.Nombre} - ID: {jugadorId}");
+
+            return new RespuestaMensaje
+            {
+                TipoMensaje = TiposMensaje.Respuesta,
+                Accion = Acciones.Conectar,
+                JugadorId = jugadorId,
+                Exito = true,
+                Mensaje = $"Jugador {jugador.Nombre} reconectado correctamente."
+            };
+        }
+
+        private void RifarlosYCrearTurnos()
+        {
+            if (turnosInicializados)
+            {
+                return;
+            }
+
+            Jugador[] orden = new Jugador[MaxJugadores];
+
+            for (int i = 0; i < MaxJugadores; i++)
+            {
+                orden[i] = jugadoresRegistrados[i]!;
+            }
+
+            // Fisher-Yates
+            for (int i = orden.Length - 1; i > 0; i--)
+            {
+                int posicionAleatoria = random.Next(i + 1);
+
+                Jugador temporal = orden[i];
+
+                orden[i] = orden[posicionAleatoria];
+                orden[posicionAleatoria] = temporal;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("=== ORDEN DE TURNOS ===");
+
+            for (int i = 0; i < orden.Length; i++)
+            {
+                turnos.Encolar(orden[i]);
+
+                Console.WriteLine(
+                    $"{i + 1}. {orden[i].Nombre}"
+                );
+            }
+
+            turnosInicializados = true;
+
+            Console.WriteLine("=======================");
+            Console.WriteLine();
         }
 
         private async Task ProcesarBotonPresionadoAsync()
