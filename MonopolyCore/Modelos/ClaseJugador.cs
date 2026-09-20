@@ -3,6 +3,13 @@ using MonopolyCore.Estructuras;
 namespace MonopolyCore.Modelos{
 public class Jugador
 {
+    //FIX TEMPORAL
+    public int ObtenerId()
+        {
+            return Id;
+        }
+
+
     //Identificacion
     private int Id;
     private string Nombre;
