@@ -151,6 +151,9 @@ namespace MonopolyServidor.Comunicacion
                 case Acciones.TerminarTurno:
                     return ProcesarTerminarTurno(mensaje);
 
+                case Acciones.ConsultarEstado:
+                    return ProcesarConsultarEstado(mensaje);
+
                 default:
                     return CrearError(
                         mensaje,
@@ -846,6 +849,42 @@ namespace MonopolyServidor.Comunicacion
                 )
             };
         }
+
+        private RespuestaMensaje ProcesarConsultarEstado(MensajeBase mensaje)
+        {
+            var jugadores = new List<object>();
+
+            for (int i = 0; i < jugadoresRegistrados.Length; i++)
+            {
+                Jugador? jugador = jugadoresRegistrados[i];
+
+                if (jugador == null)
+                {
+                    continue;
+                }
+
+                jugadores.Add(new
+                {
+                    Id = jugador.id,
+                    Nombre = jugador.nombre,
+                    Saldo = jugador.saldo,
+                    Posicion = jugador.posicionActual,
+                    Activo = jugador.activo,
+                    TarjetaRfid = jugador.tarjetaRfid
+                });
+            }
+
+            return new RespuestaMensaje
+            {
+                TipoMensaje = TiposMensaje.Respuesta,
+                Accion = Acciones.ConsultarEstado,
+                JugadorId = mensaje.JugadorId,
+                Exito = true,
+                Mensaje = "Estado de los jugadores consultado correctamente.",
+                Datos = JsonSerializer.SerializeToElement(new{Jugadores = jugadores})
+            };
+        }
+
 
         private RespuestaMensaje CrearError(MensajeBase mensaje, string codigo, string descripcion)
         {
