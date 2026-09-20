@@ -396,20 +396,20 @@ namespace MonopolyServidor.Comunicacion
                 );
             }
 
+            jugadorPendienteRfid = jugadorId;
+
             bool enviado = await EnviarEsperarRfidHardwareAsync(jugadorId);
 
             if (!enviado)
             {
+                jugadorPendienteRfid = null;
+
                 return CrearError(
                     mensaje,
                     CodigosError.AccionInvalida,
                     "No se pudo comunicar con el hardware RFID."
                 );
             }
-
-            // Solo dejamos al jugador esperando después
-            // de confirmar que la Raspberry recibió la solicitud.
-            jugadorPendienteRfid = jugadorId;
 
             Console.WriteLine($"Jugador {jugador.nombre} esperando vinculación RFID.");
 
