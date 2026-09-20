@@ -1,6 +1,13 @@
 namespace MonopolyCore.Modelos{
 public class Jugador
 {
+    //FIX TEMPORAL
+    public int ObtenerId()
+        {
+            return Id;
+        }
+
+
     //Identificacion
     private int Id;
     public string Nombre;
