@@ -64,7 +64,7 @@ public class Jugador
         this.Saldo = 0;
         this.PosicionActual = 1;
         this.Activo = false;
-        this.TarjetaRfid = "1";
+        this.TarjetaRfid = "";
         this.Propiedades = new ListaDoblementeEnlazada<Propiedad>();
         this.TurnosEnCarcel = 0;
     }

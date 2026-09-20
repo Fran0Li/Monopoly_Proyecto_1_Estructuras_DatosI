@@ -13,7 +13,7 @@ namespace MonopolyServidor.Comunicacion
     {
         private readonly TcpListener listener;
         private readonly int puerto;
-        private readonly JsonSerializerOptions opcionesJson = new JsonSerializerOptions{Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping};
+        private readonly JsonSerializerOptions opcionesJson = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
         private StreamWriter? hardwareWriter;
         private readonly Random random;
 
@@ -81,9 +81,9 @@ namespace MonopolyServidor.Comunicacion
                 using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
 
                 using StreamWriter writer = new StreamWriter(stream, Encoding.UTF8)
-                    {
-                        AutoFlush = true
-                    };
+                {
+                    AutoFlush = true
+                };
 
                 while (cliente.Connected)
                 {
@@ -104,7 +104,7 @@ namespace MonopolyServidor.Comunicacion
                         continue;
                     }
 
-                    RespuestaMensaje? respuesta =await ProcesarMensajeAsync(mensaje, writer);
+                    RespuestaMensaje? respuesta = await ProcesarMensajeAsync(mensaje, writer);
 
                     if (respuesta != null)
                     {
@@ -128,7 +128,7 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
-        private async Task<RespuestaMensaje?> ProcesarMensajeAsync(MensajeBase mensaje,StreamWriter writer)
+        private async Task<RespuestaMensaje?> ProcesarMensajeAsync(MensajeBase mensaje, StreamWriter writer)
         {
             switch (mensaje.Accion)
             {
@@ -160,7 +160,7 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
-        private RespuestaMensaje ProcesarConexion(MensajeBase mensaje,StreamWriter writer)
+        private RespuestaMensaje ProcesarConexion(MensajeBase mensaje, StreamWriter writer)
         {
             // ¿Es la Raspberry?
             if (mensaje.Datos is JsonElement datos &&
@@ -197,7 +197,7 @@ namespace MonopolyServidor.Comunicacion
             return RegistrarJugador(mensaje, writer);
         }
 
-        private RespuestaMensaje RegistrarJugador(MensajeBase mensaje,StreamWriter writer)
+        private RespuestaMensaje RegistrarJugador(MensajeBase mensaje, StreamWriter writer)
         {
             if (cantidadJugadores >= MaxJugadores)
             {
@@ -254,7 +254,7 @@ namespace MonopolyServidor.Comunicacion
             };
         }
 
-        private RespuestaMensaje ProcesarReconexionJugador(int jugadorId,StreamWriter writer)
+        private RespuestaMensaje ProcesarReconexionJugador(int jugadorId, StreamWriter writer)
         {
             if (jugadorId < 1 || jugadorId > MaxJugadores)
             {
@@ -396,13 +396,22 @@ namespace MonopolyServidor.Comunicacion
                 );
             }
 
+            bool enviado = await EnviarEsperarRfidHardwareAsync(jugadorId);
+
+            if (!enviado)
+            {
+                return CrearError(
+                    mensaje,
+                    CodigosError.AccionInvalida,
+                    "No se pudo comunicar con el hardware RFID."
+                );
+            }
+
+            // Solo dejamos al jugador esperando después
+            // de confirmar que la Raspberry recibió la solicitud.
             jugadorPendienteRfid = jugadorId;
 
-            await EnviarEsperarRfidHardwareAsync(jugadorId);
-
-            Console.WriteLine(
-                $"Jugador {jugador.nombre} esperando vinculación RFID."
-            );
+            Console.WriteLine($"Jugador {jugador.nombre} esperando vinculación RFID.");
 
             return new RespuestaMensaje
             {
@@ -414,11 +423,11 @@ namespace MonopolyServidor.Comunicacion
             };
         }
 
-        private async Task EnviarEsperarRfidHardwareAsync(int jugadorId)
+        private async Task<bool> EnviarEsperarRfidHardwareAsync(int jugadorId)
         {
             if (hardwareWriter == null)
             {
-                return;
+                return false;
             }
 
             MensajeBase mensaje = new MensajeBase
@@ -430,9 +439,24 @@ namespace MonopolyServidor.Comunicacion
 
             string json = JsonSerializer.Serialize(mensaje, opcionesJson);
 
-            await hardwareWriter.WriteLineAsync(json);
+            try
+            {
+                await hardwareWriter.WriteLineAsync(json);
+                Console.WriteLine($"Servidor esperando RFID para jugador {jugadorId}.");
 
-            Console.WriteLine($"Servidor esperando RFID para jugador {jugadorId}.");
+                return true;
+            }
+            catch
+            {
+                // Si la Raspberry perdió conexión dejamos de considerarla activa.
+                hardwareWriter = null;
+
+                Console.WriteLine(
+                    "Se perdió la conexión con el hardware RFID."
+                );
+
+                return false;
+            }
         }
 
         private async Task<RespuestaMensaje> ProcesarRfidDetectadoAsync(MensajeBase mensaje)
@@ -513,7 +537,7 @@ namespace MonopolyServidor.Comunicacion
 
             Console.WriteLine($"RFID {uid} vinculado al jugador " + $"{jugador.nombre} (ID {jugadorId}).");
 
-            await NotificarRfidVinculadoAsync(jugadorId,uid);
+            await NotificarRfidVinculadoAsync(jugadorId, uid);
 
             return new RespuestaMensaje
             {
@@ -525,7 +549,7 @@ namespace MonopolyServidor.Comunicacion
             };
         }
 
-        private async Task NotificarRfidVinculadoAsync(int jugadorId,string uid)
+        private async Task NotificarRfidVinculadoAsync(int jugadorId, string uid)
         {
             StreamWriter? writer = conexionesJugadores[jugadorId - 1];
 
@@ -547,11 +571,12 @@ namespace MonopolyServidor.Comunicacion
                 Datos = JsonSerializer.SerializeToElement(datosRfid)
             };
 
-            string json = JsonSerializer.Serialize(notificacion,opcionesJson);
+            string json = JsonSerializer.Serialize(notificacion, opcionesJson);
 
             await writer.WriteLineAsync(json);
 
-            Console.WriteLine($"Jugador {jugadorId} notificado de su RFID.");}
+            Console.WriteLine($"Jugador {jugadorId} notificado de su RFID.");
+        }
 
 
         private bool EsTurnoDe(int jugadorId)
@@ -689,7 +714,7 @@ namespace MonopolyServidor.Comunicacion
             await LanzarDadosDelTurnoAsync();
         }
 
-        private async Task NotificarDadosJugadoresAsync(Jugador jugador,int valor1,int valor2)
+        private async Task NotificarDadosJugadoresAsync(Jugador jugador, int valor1, int valor2)
         {
             int? jugadorId = ObtenerIdJugador(jugador);
 
@@ -707,7 +732,7 @@ namespace MonopolyServidor.Comunicacion
                 Datos = JsonSerializer.SerializeToElement(datosDados)
             };
 
-            string json =JsonSerializer.Serialize(notificacion,opcionesJson);
+            string json = JsonSerializer.Serialize(notificacion, opcionesJson);
 
             for (int i = 0; i < conexionesJugadores.Length; i++)
             {
@@ -733,7 +758,7 @@ namespace MonopolyServidor.Comunicacion
         {
             for (int i = 0; i < jugadoresRegistrados.Length; i++)
             {
-                if (ReferenceEquals(jugadoresRegistrados[i],jugador))
+                if (ReferenceEquals(jugadoresRegistrados[i], jugador))
                 {
                     return i + 1;
                 }
@@ -764,7 +789,7 @@ namespace MonopolyServidor.Comunicacion
 
             int jugadorId = mensaje.JugadorId.Value;
 
-            if (jugadorId < 1 ||jugadorId > MaxJugadores || jugadoresRegistrados[jugadorId - 1] == null)
+            if (jugadorId < 1 || jugadorId > MaxJugadores || jugadoresRegistrados[jugadorId - 1] == null)
             {
                 return CrearError(
                     mensaje,
@@ -798,7 +823,7 @@ namespace MonopolyServidor.Comunicacion
             dadosLanzadosEnTurno = false;
             numeroTurnoActual++;
 
-            int? siguienteJugadorId =ObtenerIdJugador(siguienteJugador);
+            int? siguienteJugadorId = ObtenerIdJugador(siguienteJugador);
 
             Console.WriteLine($"Turno de {jugadorAnterior.nombre} terminado.");
 
@@ -813,16 +838,16 @@ namespace MonopolyServidor.Comunicacion
                 Mensaje =
                     $"Turno terminado. Ahora juega {siguienteJugador.nombre}.",
                 Datos = JsonSerializer.SerializeToElement(new
-                    { 
-                        NumeroTurno = numeroTurnoActual,
-                        SiguienteJugadorId = siguienteJugadorId,
-                        SiguienteJugador = siguienteJugador.nombre
-                    }
+                {
+                    NumeroTurno = numeroTurnoActual,
+                    SiguienteJugadorId = siguienteJugadorId,
+                    SiguienteJugador = siguienteJugador.nombre
+                }
                 )
             };
         }
 
-        private RespuestaMensaje CrearError(MensajeBase mensaje,string codigo,string descripcion)
+        private RespuestaMensaje CrearError(MensajeBase mensaje, string codigo, string descripcion)
         {
             return new RespuestaMensaje
             {
@@ -831,7 +856,7 @@ namespace MonopolyServidor.Comunicacion
                 JugadorId = mensaje.JugadorId,
                 Exito = false,
                 Mensaje = descripcion,
-                Datos = JsonSerializer.SerializeToElement(new{Codigo = codigo})
+                Datos = JsonSerializer.SerializeToElement(new { Codigo = codigo })
             };
         }
 
@@ -857,13 +882,20 @@ namespace MonopolyServidor.Comunicacion
                 Datos = JsonSerializer.SerializeToElement(datosDados)
             };
 
-            string json =
-                JsonSerializer.Serialize(notificacion, opcionesJson);
+            string json = JsonSerializer.Serialize(notificacion, opcionesJson);
 
-            await hardwareWriter.WriteLineAsync(json);
+            try
+            {
+                await hardwareWriter.WriteLineAsync(json);
 
-            Console.WriteLine($"Enviado a Raspberry: {json}");
+                Console.WriteLine($"Enviado a Raspberry: {json}");
+            }
+            catch
+            {
+                hardwareWriter = null;
+
+                Console.WriteLine("Se perdió la conexión con el hardware.");
+            }
         }
-
     }
 }
