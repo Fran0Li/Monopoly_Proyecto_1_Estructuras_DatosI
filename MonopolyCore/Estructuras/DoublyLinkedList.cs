@@ -1,5 +1,6 @@
 namespace MonopolyCore.Estructuras {
-class ListaDoblementeEnlazada<T>
+
+public class ListaDoblementeEnlazada<T>
 {
     private NodoDoble<T>? cabeza;
     private NodoDoble<T>? cola;
@@ -23,17 +24,45 @@ class ListaDoblementeEnlazada<T>
         {
             this.cabeza = this.cola = nuevoNodo;
         }
-        else{this.cola = nuevoNodo;}
+        else
+        {
+            nuevoNodo.Anterior = cola;
+            cola!.Siguiente = nuevoNodo;
+            this.cola = nuevoNodo;
+        }
         this.cantidad++;
     }
-    public void RecorrerDesdeInicio()
+    public IEnumerable<T> RecorrerDesdeInicio()
     {
-        
+        NodoDoble<T>? actual = cabeza;
+        while (actual != null)
+            {
+                yield return actual.Valor;
+                actual = actual.Siguiente;
+            }
     }
-    public void RecorrerDesdeFinal()
+    public IEnumerable<T> RecorrerDesdeFinal()
     {
-        
+        NodoDoble<T>? actual = cola;
+        while (actual != null)
+            {
+                yield return actual.Valor;
+                actual = actual.Anterior;
+            }
     }
+    public IEnumerable<T> BuscarPor(Func<T, bool> predicado)
+    {
+    NodoDoble<T>? actual = cabeza;
 
+    while (actual != null)
+    {
+        if (predicado(actual.Valor))
+        {
+            yield return actual.Valor;
+        }
+
+        actual = actual.Siguiente;
+    }
+    }
 }
 }
