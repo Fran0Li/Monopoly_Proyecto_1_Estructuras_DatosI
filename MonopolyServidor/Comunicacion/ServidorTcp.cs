@@ -285,7 +285,7 @@ namespace MonopolyServidor.Comunicacion
             // Sustituimos el socket viejo por el nuevo
             conexionesJugadores[jugadorId - 1] = writer;
 
-            Console.WriteLine($"Jugador reconectado: {jugador.Nombre} - ID: {jugadorId}");
+            Console.WriteLine($"Jugador reconectado: {jugador.nombre} - ID: {jugadorId}");
 
             return new RespuestaMensaje
             {
@@ -293,7 +293,7 @@ namespace MonopolyServidor.Comunicacion
                 Accion = Acciones.Conectar,
                 JugadorId = jugadorId,
                 Exito = true,
-                Mensaje = $"Jugador {jugador.Nombre} reconectado correctamente."
+                Mensaje = $"Jugador {jugador.nombre} reconectado correctamente."
             };
         }
 
@@ -330,7 +330,7 @@ namespace MonopolyServidor.Comunicacion
                 turnos.Encolar(orden[i]);
 
                 Console.WriteLine(
-                    $"{i + 1}. {orden[i].Nombre}"
+                    $"{i + 1}. {orden[i].nombre}"
                 );
             }
 
@@ -342,7 +342,7 @@ namespace MonopolyServidor.Comunicacion
             numeroTurnoActual = 1;
             dadosLanzadosEnTurno = false;
 
-            Console.WriteLine($"Comienza el turno {numeroTurnoActual}: {turnos.Actual().Nombre}");
+            Console.WriteLine($"Comienza el turno {numeroTurnoActual}: {turnos.Actual().nombre}");
         }
 
         private async Task<RespuestaMensaje> ProcesarVincularRfidAsync(MensajeBase mensaje)
@@ -401,7 +401,7 @@ namespace MonopolyServidor.Comunicacion
             await EnviarEsperarRfidHardwareAsync(jugadorId);
 
             Console.WriteLine(
-                $"Jugador {jugador.Nombre} esperando vinculación RFID."
+                $"Jugador {jugador.nombre} esperando vinculación RFID."
             );
 
             return new RespuestaMensaje
@@ -481,7 +481,7 @@ namespace MonopolyServidor.Comunicacion
             {
                 Jugador? registrado = jugadoresRegistrados[i];
 
-                if (registrado != null && registrado.TarjetaRfid == uid && registrado != jugadoresRegistrados[jugadorPendienteRfid.Value - 1])
+                if (registrado != null && registrado.tarjetaRfid == uid && registrado != jugadoresRegistrados[jugadorPendienteRfid.Value - 1])
                 {
                     return CrearError(
                         mensaje,
@@ -507,11 +507,11 @@ namespace MonopolyServidor.Comunicacion
             }
 
             // Vinculación.
-            jugador.TarjetaRfid = uid;
+            jugador.tarjetaRfid = uid;
 
             jugadorPendienteRfid = null;
 
-            Console.WriteLine($"RFID {uid} vinculado al jugador " + $"{jugador.Nombre} (ID {jugadorId}).");
+            Console.WriteLine($"RFID {uid} vinculado al jugador " + $"{jugador.nombre} (ID {jugadorId}).");
 
             await NotificarRfidVinculadoAsync(jugadorId,uid);
 
@@ -521,7 +521,7 @@ namespace MonopolyServidor.Comunicacion
                 Accion = Acciones.RfidDetectado,
                 JugadorId = jugadorId,
                 Exito = true,
-                Mensaje = $"RFID vinculado correctamente al jugador {jugador.Nombre}."
+                Mensaje = $"RFID vinculado correctamente al jugador {jugador.nombre}."
             };
         }
 
@@ -587,7 +587,7 @@ namespace MonopolyServidor.Comunicacion
 
             Console.WriteLine(
                 $"Turno {numeroTurnoActual} - " +
-                $"{jugadorActual.Nombre} lanzó {valor1} y {valor2}."
+                $"{jugadorActual.nombre} lanzó {valor1} y {valor2}."
             );
 
             await EnviarDadosHardwareAsync(valor1, valor2);
@@ -800,9 +800,9 @@ namespace MonopolyServidor.Comunicacion
 
             int? siguienteJugadorId =ObtenerIdJugador(siguienteJugador);
 
-            Console.WriteLine($"Turno de {jugadorAnterior.Nombre} terminado.");
+            Console.WriteLine($"Turno de {jugadorAnterior.nombre} terminado.");
 
-            Console.WriteLine($"Turno {numeroTurnoActual}: {siguienteJugador.Nombre}");
+            Console.WriteLine($"Turno {numeroTurnoActual}: {siguienteJugador.nombre}");
 
             return new RespuestaMensaje
             {
@@ -811,12 +811,12 @@ namespace MonopolyServidor.Comunicacion
                 JugadorId = jugadorId,
                 Exito = true,
                 Mensaje =
-                    $"Turno terminado. Ahora juega {siguienteJugador.Nombre}.",
+                    $"Turno terminado. Ahora juega {siguienteJugador.nombre}.",
                 Datos = JsonSerializer.SerializeToElement(new
                     { 
                         NumeroTurno = numeroTurnoActual,
                         SiguienteJugadorId = siguienteJugadorId,
-                        SiguienteJugador = siguienteJugador.Nombre
+                        SiguienteJugador = siguienteJugador.nombre
                     }
                 )
             };

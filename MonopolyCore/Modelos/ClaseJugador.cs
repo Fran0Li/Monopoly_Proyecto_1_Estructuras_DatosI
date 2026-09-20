@@ -43,8 +43,8 @@ public class Jugador
         }
     public int posicionActual
         {
-            get {return Saldo;}
-            set {Saldo = value;}
+            get {return PosicionActual;}
+            set {PosicionActual = value;}
         }
     public bool activo
         {

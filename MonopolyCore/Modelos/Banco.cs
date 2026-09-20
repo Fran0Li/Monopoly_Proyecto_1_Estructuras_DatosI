@@ -38,7 +38,7 @@ namespace MonopolyCore
                 return false;
             }
 
-            return jugador.Saldo >= monto;
+            return jugador.saldo >= monto;
         }
 
         // Un origen null representa al Banco pagando.
@@ -82,14 +82,14 @@ namespace MonopolyCore
 
             if (origen != null)
             {
-                origen.Saldo -= monto;
+                origen.saldo -= monto;
             }
 
             // Si el destino es un jugador se acredita el dinero.
             // Cuando destino es null, significa que recibe el Banco.
             if (destino != null)
             {
-                destino.Saldo += monto;
+                destino.saldo += monto;
             }
 
             // Se registra la operación después de modificar correctamente
