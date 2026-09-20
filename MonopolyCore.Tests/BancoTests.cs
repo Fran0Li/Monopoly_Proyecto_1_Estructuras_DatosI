@@ -133,5 +133,116 @@ namespace MonopolyCore.Tests
 
             Assert.AreEqual(1, cantidad);
         }
+
+        [TestMethod]
+        public void PagarMontoCero_NoPermiteTransaccion()
+        {
+            Banco banco = new Banco();
+
+            Jugador jugador = new Jugador(1, "Esteban");
+            jugador.saldo = 1000;
+
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => banco.Pagar(jugador,null,0,TipoTransaccion.PagoAlBanco,"Monto inválido",1));
+
+            Assert.AreEqual(1000, jugador.saldo);
+            Assert.AreEqual(0, banco.CantidadTransacciones);
+        }
+
+        [TestMethod]
+        public void PagarSinOrigenNiDestino_NoPermiteTransaccion()
+        {
+            Banco banco = new Banco();
+
+            Assert.ThrowsExactly<InvalidOperationException>(() => banco.Pagar(null,null,100,TipoTransaccion.PagoAlBanco,"Transacción inválida",1));
+
+            Assert.AreEqual(0, banco.CantidadTransacciones);
+        }
+
+        [TestMethod]
+        public void PagarVariasVeces_GeneraIdsConsecutivos()
+        {
+            Banco banco = new Banco();
+
+            Jugador jugador = new Jugador(1, "Esteban");
+            jugador.saldo = 1000;
+
+            Transaccion primera = banco.Pagar(jugador,null,100,TipoTransaccion.PagoAlBanco,"Primera",1);
+
+            Transaccion segunda = banco.Pagar(jugador,null,100,TipoTransaccion.PagoAlBanco,"Segunda",2);
+
+            Assert.AreEqual(1, primera.Id);
+            Assert.AreEqual(2, segunda.Id);
+        }
+
+        [TestMethod]
+        public void ConsultarHistorialCompleto_RespetaAmbosSentidos()
+        {
+            Banco banco = new Banco();
+
+            Jugador jugador = new Jugador(1, "Esteban");
+            jugador.saldo = 1000;
+
+            banco.Pagar(jugador,null,100,TipoTransaccion.PagoAlBanco,"Primera",1);
+            banco.Pagar(jugador,null,100,TipoTransaccion.PagoAlBanco,"Segunda",2);
+            banco.Pagar(jugador,null,100,TipoTransaccion.PagoAlBanco,"Tercera",3);
+
+            int[] desdeInicio = new int[3];
+            int indice = 0;
+
+            foreach (Transaccion transaccion in banco.ConsultarHistorialCompleto(true))
+            {
+                desdeInicio[indice] = transaccion.Id;
+                indice++;
+            }
+
+            Assert.AreEqual(1, desdeInicio[0]);
+            Assert.AreEqual(2, desdeInicio[1]);
+            Assert.AreEqual(3, desdeInicio[2]);
+
+            int[] desdeFinal = new int[3];
+            indice = 0;
+
+            foreach (Transaccion transaccion in banco.ConsultarHistorialCompleto(false))
+            {
+                desdeFinal[indice] = transaccion.Id;
+                indice++;
+            }
+
+            Assert.AreEqual(3, desdeFinal[0]);
+            Assert.AreEqual(2, desdeFinal[1]);
+            Assert.AreEqual(1, desdeFinal[2]);
+        }
+
+        [TestMethod]
+        public void ExportarHistorialTxt_CreaArchivoConTransacciones()
+        {
+            Banco banco = new Banco();
+
+            Jugador jugador = new Jugador(1, "Esteban");
+            jugador.saldo = 1000;
+
+            banco.Pagar(jugador,null,200,TipoTransaccion.PagoAlBanco,"Pago de prueba",1);
+
+            string ruta = Path.Combine(Path.GetTempPath(),$"monopoly_{Guid.NewGuid()}.txt");
+
+            try
+            {
+                banco.ExportarHistorialTxt(ruta);
+                Assert.IsTrue(File.Exists(ruta));
+
+                string contenido = File.ReadAllText(ruta);
+
+                StringAssert.Contains(contenido,"Pago de prueba");
+                StringAssert.Contains(contenido,"Jugador 1");
+                StringAssert.Contains(contenido,"Banco");
+            }
+            finally
+            {
+                if (File.Exists(ruta))
+                {
+                    File.Delete(ruta);
+                }
+            }
+        }
     }
 }

@@ -127,5 +127,37 @@ namespace MonopolyCore
 
             return historial.RecorrerDesdeFinal();
         }
+
+        // Exporta el historial completo de transacciones a un archivo de texto.
+        // Las transacciones se escriben desde la más antigua a la más reciente.
+        public void ExportarHistorialTxt(string rutaArchivo)
+        {
+            if (string.IsNullOrWhiteSpace(rutaArchivo))
+            {
+                throw new ArgumentException("La ruta del archivo no puede estar vacía.",nameof(rutaArchivo));
+            }
+
+            using StreamWriter archivo = new StreamWriter(rutaArchivo, false);
+
+            archivo.WriteLine("=== HISTORIAL DE TRANSACCIONES ===");
+            archivo.WriteLine();
+
+            foreach (Transaccion transaccion in historial.RecorrerDesdeInicio())
+            {
+                string origen = transaccion.JugadorOrigenId.HasValue? $"Jugador {transaccion.JugadorOrigenId.Value}": "Banco";
+
+                string destino = transaccion.JugadorDestinoId.HasValue? $"Jugador {transaccion.JugadorDestinoId.Value}": "Banco";
+
+                archivo.WriteLine(
+                    $"ID: {transaccion.Id} | " +
+                    $"Fecha: {transaccion.FechaHora:yyyy-MM-dd HH:mm:ss} | " +
+                    $"Turno: {transaccion.NumeroTurno} | " +
+                    $"Tipo: {transaccion.Tipo} | " +
+                    $"Origen: {origen} | " +
+                    $"Destino: {destino} | " +
+                    $"Monto: {transaccion.Monto} | " +
+                    $"Descripción: {transaccion.Descripcion}");
+            }
+        }
     }
 }
