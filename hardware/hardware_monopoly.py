@@ -7,10 +7,10 @@ from machine import Pin
 
 # CONFIGURACIÓN 
 
-WIFI_SSID = "NOMBRE_DEL_HOTSPOT"
-WIFI_PASSWORD = "CONTRASEÑA_HOTSPOT"
+WIFI_SSID = "FranLi"
+WIFI_PASSWORD = "********"
 
-SERVIDOR_IP = "192.168.1.100"   #  cambiar para las pruebas
+SERVIDOR_IP = "10.154.57.206"   #  cambiar para las pruebas
 SERVIDOR_PUERTO = 5000           # puerto correcto
 
 
@@ -181,7 +181,11 @@ def revisar_mensajes_servidor(sock):
 
 def procesar_mensaje(linea_bytes):
     try:
-        mensaje = ujson.loads(linea_bytes.decode("utf-8"))
+        texto = linea_bytes.decode("utf-8")
+        #Quita el BOM (/uefeff) que c# agrega al inicio de los mensajes
+        if texto and texto[0] == "\ufeff":
+            texto = texto[1:]
+        mensaje = ujson.loads(texto)
     except ValueError:
         print("Mensaje mal formado, se ignora:", linea_bytes)
         return
@@ -223,7 +227,7 @@ def main():
     while True:
         revisar_mensajes_servidor(sock)
         revisar_boton(sock)
-        # revisar_rfid(sock)   # descomentar cuando el RC522 esté listo
+        revisar_rfid(sock)   
 
         time.sleep_ms(100)
 
