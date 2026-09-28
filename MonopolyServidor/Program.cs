@@ -1,17 +1,16 @@
-﻿using MonopolyServidor.Comunicacion;
+﻿using MonopolyCore;
+using MonopolyServidor.Comunicacion;
 
-ServidorTcp servidor = new ServidorTcp(5000);
+// Configuración de la partida (ajustable para la demo).
+// minJugadores: 4 para la defensa; 2 sirve para probar con menos compus.
+Juego juego = new Juego(
+    saldoInicial: 1500,
+    premioPorInicio: 200,
+    maxTurnos: 60,
+    minJugadores: 2);
+
+ServidorTcp servidor = new ServidorTcp(5000, juego);
 
 await servidor.IniciarAsync();
 
-
-public static class CodigosError
-{
-    public const string FueraDeTurno = "FUERA_DE_TURNO";
-    public const string SaldoInsuficiente = "SALDO_INSUFICIENTE";
-    public const string PropiedadYaVendida = "PROPIEDAD_YA_VENDIDA";
-    public const string DadosYaLanzados = "DADOS_YA_LANZADOS";
-    public const string JugadorNoEncontrado = "JUGADOR_NO_ENCONTRADO";
-    public const string AccionInvalida = "ACCION_INVALIDA";
-    public const string JugadorEliminado = "JUGADOR_ELIMINADO";
-}
+// CodigosError se movió a MonopolyCore.Comunicacion (Protocolo.cs) porque Juego también los usa.

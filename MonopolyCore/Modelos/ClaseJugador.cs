@@ -62,7 +62,7 @@ public class Jugador
         this.Id = Id;
         this.Nombre = Nombre;
         this.Saldo = 0;
-        this.PosicionActual = 1;
+        this.PosicionActual = 0; //0 = Inicio
         this.Activo = false;
         this.TarjetaRfid = "";
         this.Propiedades = new ListaDoblementeEnlazada<Propiedad>();
@@ -84,6 +84,23 @@ public class Jugador
     public void AgregarPropiedad(Propiedad propiedad)
     {
         Propiedades.AgregarAlFinal(propiedad);
+    }
+    public IEnumerable<Propiedad> ObtenerPropiedades() //solo lectura, para estado/GUI
+    {
+        return Propiedades.RecorrerDesdeInicio();
+    }
+    public int CantidadPropiedades
+    {
+        get { return Propiedades.GetCantidad(); }
+    }
+    //Al quedar eliminado, sus propiedades vuelven a estar disponibles
+    public void LiberarPropiedades()
+    {
+        foreach (Propiedad propiedad in Propiedades.RecorrerDesdeInicio())
+        {
+            propiedad.Propietario = null;
+        }
+        Propiedades = new ListaDoblementeEnlazada<Propiedad>();
     }
 }
 }

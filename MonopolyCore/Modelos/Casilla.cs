@@ -38,5 +38,9 @@ public abstract class Casilla
         this.tipo = tipo;
     }
 
+    //Comportamiento polimórfico: cada tipo de casilla decide qué pasa cuando un jugador cae en ella.
+    //Juego lo llama sin preguntar el tipo de casilla.
+    public abstract void AlCaer(Jugador jugador, Juego juego);
+
 }
 }

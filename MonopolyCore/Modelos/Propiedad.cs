@@ -50,5 +50,22 @@ public class Propiedad : Casilla
         return alquiler;
 
     }
+
+    public override void AlCaer(Jugador jugador, Juego juego)
+    {
+        if (propietario == null) //disponible: se ofrece la compra
+        {
+            juego.OfrecerCompra(jugador, this);
+        }
+        else if (ReferenceEquals(propietario, jugador)) //es suya: no paga nada
+        {
+            juego.Informar(jugador, $"{jugador.nombre} cayó en su propiedad {Nombre}.");
+        }
+        else //es de otro: paga alquiler
+        {
+            juego.CobrarObligatorio(jugador, propietario, (int)CalcularAlquiler(), TipoTransaccion.PagoAlquiler,
+                $"Alquiler de {Nombre} pagado a {propietario.nombre}");
+        }
+    }
 }
 }

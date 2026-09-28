@@ -1,5 +1,5 @@
-﻿using MonopolyCore.Comunicacion;
-using MonopolyCore.Estructuras;
+﻿using MonopolyCore;
+using MonopolyCore.Comunicacion;
 using MonopolyCore.Modelos;
 using System.Net;
 using System.Net.Sockets;
@@ -9,111 +9,93 @@ using System.Text.Json;
 
 namespace MonopolyServidor.Comunicacion
 {
+    // Capa de transporte. NO tiene reglas de juego: todo eso vive en Juego (MonopolyCore).
+    // Por cada mensaje: valida quién lo manda -> llama a Juego -> responde -> notifica a todos.
     public class ServidorTcp
     {
         private readonly TcpListener listener;
         private readonly int puerto;
         private readonly JsonSerializerOptions opcionesJson = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+        private readonly Juego juego;
+
+        // Conexión de cada jugador (índice = id - 1) y de la Raspberry
+        private readonly StreamWriter?[] conexionesJugadores = new StreamWriter?[Juego.MaxJugadores];
         private StreamWriter? hardwareWriter;
-        private readonly Random random;
 
+        // Un mensaje a la vez: evita que dos clientes (o botón + cliente) modifiquen el estado
+        // al mismo tiempo y que dos escrituras se mezclen en el mismo socket.
+        // SemaphoreSlim y no lock porque adentro hay await.
+        private readonly SemaphoreSlim candado = new SemaphoreSlim(1, 1);
 
-        private const int MaxJugadores = 4;
-        private readonly Jugador?[] jugadoresRegistrados;
-        private readonly StreamWriter?[] conexionesJugadores;
-        private readonly ColaCircular<Jugador> turnos;
-        private int cantidadJugadores;
-        private bool turnosInicializados;
+        public ServidorTcp(int puerto) : this(puerto, new Juego()) { }
 
-        private int? jugadorPendienteRfid;
-
-
-        private readonly Dado dado;
-        private bool dadosLanzadosEnTurno;
-        private int numeroTurnoActual;
-
-        public ServidorTcp(int puerto)
+        public ServidorTcp(int puerto, Juego juego)
         {
             this.puerto = puerto;
+            this.juego = juego;
             listener = new TcpListener(IPAddress.Any, puerto);
-
-
-            jugadoresRegistrados = new Jugador?[MaxJugadores];
-            conexionesJugadores = new StreamWriter?[MaxJugadores];
-
-            turnos = new ColaCircular<Jugador>();
-
-            cantidadJugadores = 0;
-            turnosInicializados = false;
-            jugadorPendienteRfid = null;
-
-
-            dado = new Dado();
-            dadosLanzadosEnTurno = false;
-            numeroTurnoActual = 0;
-
-            random = new Random();
         }
 
         public async Task IniciarAsync()
         {
             listener.Start();
-
             Console.WriteLine($"Servidor iniciado en el puerto {puerto}");
             Console.WriteLine("Esperando conexiones...");
 
             while (true)
             {
                 TcpClient cliente = await listener.AcceptTcpClientAsync();
-
                 Console.WriteLine("Nuevo cliente conectado.");
-
                 _ = AtenderClienteAsync(cliente);
             }
         }
 
         private async Task AtenderClienteAsync(TcpClient cliente)
         {
+            StreamWriter? writer = null;
             try
             {
                 using NetworkStream stream = cliente.GetStream();
-
                 using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
+                writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
 
-                using StreamWriter writer = new StreamWriter(stream, Encoding.UTF8)
-                {
-                    AutoFlush = true
-                };
-
-                while (cliente.Connected)
+                while (true)
                 {
                     string? linea = await reader.ReadLineAsync();
-
-                    if (linea == null)
-                    {
-                        break;
-                    }
+                    if (linea == null) break;
+                    if (string.IsNullOrWhiteSpace(linea)) continue;
 
                     Console.WriteLine($"Recibido: {linea}");
 
-                    MensajeBase? mensaje =
-                        JsonSerializer.Deserialize<MensajeBase>(linea);
-
-                    if (mensaje == null)
+                    // Un JSON malo solo genera un error, no tumba la conexión
+                    MensajeBase? mensaje;
+                    try
                     {
+                        mensaje = JsonSerializer.Deserialize<MensajeBase>(linea, opcionesJson);
+                    }
+                    catch (JsonException)
+                    {
+                        await candado.WaitAsync();
+                        try { await EnviarAsync(writer, CrearError("", null, CodigosError.MensajeInvalido, "El mensaje no es un JSON válido.")); }
+                        finally { candado.Release(); }
                         continue;
                     }
+                    if (mensaje == null) continue;
 
-                    RespuestaMensaje? respuesta = await ProcesarMensajeAsync(mensaje, writer);
-
-                    if (respuesta != null)
+                    await candado.WaitAsync();
+                    try
                     {
-                        string jsonRespuesta =
-                            JsonSerializer.Serialize(respuesta, opcionesJson);
-
-                        await writer.WriteLineAsync(jsonRespuesta);
-
-                        Console.WriteLine($"Enviado: {jsonRespuesta}");
+                        await ProcesarMensajeAsync(mensaje, writer);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error procesando {mensaje.Accion}: {ex}");
+                        await EnviarAsync(writer, CrearError(mensaje.Accion, mensaje.JugadorId, CodigosError.AccionInvalida, "Error interno del servidor."));
+                    }
+                    finally
+                    {
+                        candado.Release();
                     }
                 }
             }
@@ -123,818 +105,377 @@ namespace MonopolyServidor.Comunicacion
             }
             finally
             {
+                await LimpiarConexionAsync(writer);
                 cliente.Close();
                 Console.WriteLine("Cliente desconectado.");
             }
         }
 
-        private async Task<RespuestaMensaje?> ProcesarMensajeAsync(MensajeBase mensaje, StreamWriter writer)
+        //  DESPACHO
+    
+
+        private async Task ProcesarMensajeAsync(MensajeBase mensaje, StreamWriter writer)
         {
-            switch (mensaje.Accion)
+            string accion = mensaje.Accion;
+            ResultadoAccion resultado;
+            bool responder = true;
+
+            switch (accion)
             {
                 case Acciones.Conectar:
-                    return ProcesarConexion(mensaje, writer);
+                    resultado = ProcesarConexion(mensaje, writer);
+                    break;
 
-                case Acciones.VincularRfid:
-                    return await ProcesarVincularRfidAsync(mensaje);
-
-                case Acciones.RfidDetectado:
-                    return await ProcesarRfidDetectadoAsync(mensaje);
-
+                //  acciones del jugador en turno (deben venir de SU conexión) 
+                case Acciones.IniciarJuego:
                 case Acciones.TirarDados:
-                    return await ProcesarTirarDadosAsync(mensaje);
-
-                case Acciones.BotonPresionado:
-                    await ProcesarBotonPresionadoAsync();
-                    return null;
-
+                case Acciones.ComprarPropiedad:
+                case Acciones.NoComprar:
                 case Acciones.TerminarTurno:
-                    return ProcesarTerminarTurno(mensaje);
+                case Acciones.VincularRfid:
+                    if (!EsConexionDelJugador(mensaje, writer))
+                    {
+                        await EnviarAsync(writer, CrearError(accion, mensaje.JugadorId, CodigosError.JugadorNoEncontrado,
+                            "Esta conexión no corresponde a ese jugador."));
+                        return;
+                    }
+                    int id = mensaje.JugadorId!.Value;
+                    resultado = accion switch
+                    {
+                        Acciones.IniciarJuego => juego.IniciarJuego(id),
+                        Acciones.TirarDados => juego.TirarDados(id),
+                        Acciones.ComprarPropiedad => juego.ComprarPropiedad(id),
+                        Acciones.NoComprar => juego.NoComprar(id),
+                        Acciones.TerminarTurno => juego.TerminarTurno(id),
+                        _ => await ProcesarVincularRfidAsync(id)
+                    };
+                    break;
 
+                //  mensajes que solo acepta desde la Raspberry 
+                case Acciones.RfidDetectado:
+                case Acciones.BotonPresionado:
+                    if (!ReferenceEquals(writer, hardwareWriter))
+                    {
+                        await EnviarAsync(writer, CrearError(accion, mensaje.JugadorId, CodigosError.AccionInvalida,
+                            "Solo el hardware puede enviar esta acción."));
+                        return;
+                    }
+                    if (accion == Acciones.BotonPresionado)
+                    {
+                        resultado = juego.TirarDadosJugadorActual();
+                        responder = false; //el botón no espera respuesta
+                        if (!resultado.Exito) Console.WriteLine($"Botón ignorado: {resultado.Mensaje}");
+                    }
+                    else
+                    {
+                        resultado = ProcesarRfidDetectado(mensaje);
+                    }
+                    break;
+
+                //  consultas (cualquiera puede consultar) 
                 case Acciones.ConsultarEstado:
-                    return ProcesarConsultarEstado(mensaje);
+                    resultado = ResultadoAccion.Ok("Estado consultado correctamente.", juego.ObtenerEstado());
+                    resultado.NotificarEstado = false;
+                    break;
+
+                case Acciones.ConsultarTransacciones:
+                    resultado = ProcesarConsultarTransacciones(mensaje);
+                    break;
+
+                case Acciones.ExportarTransacciones:
+                    string ruta = juego.ExportarTransacciones();
+                    Console.WriteLine($"Historial exportado en {ruta}");
+                    resultado = ResultadoAccion.Ok($"Historial exportado en {ruta}", new { Ruta = ruta });
+                    resultado.NotificarEstado = false;
+                    break;
 
                 default:
-                    return CrearError(
-                        mensaje,
-                        CodigosError.AccionInvalida,
-                        $"La acción {mensaje.Accion} no es válida."
-                    );
+                    resultado = ResultadoAccion.Error(CodigosError.AccionInvalida, $"La acción {accion} no es válida.");
+                    break;
+            }
+
+            if (responder)
+            {
+                await EnviarAsync(writer, CrearRespuesta(accion, mensaje.JugadorId, resultado));
+            }
+
+            if (resultado.Exito)
+            {
+                await DifundirAsync(resultado);
             }
         }
 
-        private RespuestaMensaje ProcesarConexion(MensajeBase mensaje, StreamWriter writer)
+    //  CONEXIÓN / REGISTRO
+        
+
+        private ResultadoAccion ProcesarConexion(MensajeBase mensaje, StreamWriter writer)
         {
             // ¿Es la Raspberry?
-            if (mensaje.Datos is JsonElement datos &&
-                datos.ValueKind == JsonValueKind.Object &&
-                datos.TryGetProperty("TipoCliente", out JsonElement tipoCliente))
+            if (mensaje.Datos is JsonElement datos && datos.ValueKind == JsonValueKind.Object &&
+                datos.TryGetProperty("TipoCliente", out JsonElement tipoCliente) &&
+                tipoCliente.ValueKind == JsonValueKind.String && tipoCliente.GetString() == "Hardware")
             {
-                if (tipoCliente.GetString() == "Hardware")
-                {
-                    hardwareWriter = writer;
-
-                    Console.WriteLine("Hardware Raspberry registrado.");
-
-                    return new RespuestaMensaje
-                    {
-                        TipoMensaje = TiposMensaje.Respuesta,
-                        Accion = Acciones.Conectar,
-                        JugadorId = null,
-                        Exito = true,
-                        Mensaje = "Hardware conectado correctamente"
-                    };
-                }
+                hardwareWriter = writer;
+                juego.UsarRfidParaPagos = true;
+                Console.WriteLine("Hardware Raspberry registrado.");
+                ResultadoAccion r = ResultadoAccion.Ok("Hardware conectado correctamente");
+                r.NotificarEstado = true;
+                return r;
             }
 
-            // Si trae JugadorId, intentamos reconectarlo
+            // Reconexión de un jugador ya registrado
             if (mensaje.JugadorId.HasValue)
             {
-                return ProcesarReconexionJugador(
-                    mensaje.JugadorId.Value,
-                    writer
-                );
+                int id = mensaje.JugadorId.Value;
+                Jugador? jugador = juego.ObtenerJugador(id);
+                if (jugador == null)
+                    return ResultadoAccion.Error(CodigosError.JugadorNoEncontrado, "El jugador indicado no está registrado.");
+
+                conexionesJugadores[id - 1] = writer;
+                Console.WriteLine($"Jugador reconectado: {jugador.nombre} - ID: {id}");
+                ResultadoAccion r = ResultadoAccion.Ok($"Jugador {jugador.nombre} reconectado correctamente.");
+                r.JugadorId = id;
+                r.NotificarEstado = false;
+                return r;
             }
 
-            // Si no trae ID es un jugador nuevo
-            return RegistrarJugador(mensaje, writer);
+            // Jugador nuevo
+            string nombre = "";
+            if (mensaje.Datos is JsonElement d && d.ValueKind == JsonValueKind.Object &&
+                d.TryGetProperty("Nombre", out JsonElement nombreElemento) && nombreElemento.ValueKind == JsonValueKind.String)
+            {
+                nombre = nombreElemento.GetString() ?? "";
+            }
+
+            ResultadoAccion resultado = juego.AgregarJugador(nombre);
+            if (resultado.Exito && resultado.JugadorId.HasValue)
+            {
+                conexionesJugadores[resultado.JugadorId.Value - 1] = writer;
+                Console.WriteLine($"Jugador registrado: {nombre} - ID: {resultado.JugadorId}");
+            }
+            return resultado;
         }
 
-        private RespuestaMensaje RegistrarJugador(MensajeBase mensaje, StreamWriter writer)
+        // El JugadorId del mensaje debe corresponder a la conexión que lo registró.
+        private bool EsConexionDelJugador(MensajeBase mensaje, StreamWriter writer)
         {
-            if (cantidadJugadores >= MaxJugadores)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "La partida ya tiene 4 jugadores."
-                );
-            }
-
-            if (mensaje.Datos is not JsonElement datos || !datos.TryGetProperty("Nombre", out JsonElement nombreElemento))
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "No se recibió el nombre del jugador."
-                );
-            }
-
-            string? nombre = nombreElemento.GetString();
-
-            if (string.IsNullOrWhiteSpace(nombre))
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "El nombre del jugador no es válido."
-                );
-            }
-
-            int nuevoId = cantidadJugadores + 1;
-
-            Jugador jugador = new Jugador(nuevoId, nombre);
-
-            jugadoresRegistrados[nuevoId - 1] = jugador;
-            conexionesJugadores[nuevoId - 1] = writer;
-
-            cantidadJugadores++;
-
-            Console.WriteLine($"Jugador registrado: {nombre} - ID: {nuevoId}");
-
-            if (cantidadJugadores == MaxJugadores)
-            {
-                RifarlosYCrearTurnos();
-            }
-
-            return new RespuestaMensaje
-            {
-                TipoMensaje = TiposMensaje.Respuesta,
-                Accion = Acciones.Conectar,
-                JugadorId = nuevoId,
-                Exito = true,
-                Mensaje = $"Jugador {nombre} registrado correctamente. ID: {nuevoId}"
-            };
+            if (!mensaje.JugadorId.HasValue) return false;
+            int id = mensaje.JugadorId.Value;
+            if (id < 1 || id > Juego.MaxJugadores) return false;
+            return ReferenceEquals(conexionesJugadores[id - 1], writer);
         }
 
-        private RespuestaMensaje ProcesarReconexionJugador(int jugadorId, StreamWriter writer)
+        private async Task LimpiarConexionAsync(StreamWriter? writer)
         {
-            if (jugadorId < 1 || jugadorId > MaxJugadores)
-            {
-                return new RespuestaMensaje
-                {
-                    TipoMensaje = TiposMensaje.Respuesta,
-                    Accion = Acciones.Conectar,
-                    JugadorId = jugadorId,
-                    Exito = false,
-                    Mensaje = "El jugador indicado no existe."
-                };
-            }
+            if (writer == null) return;
 
-            Jugador? jugador = jugadoresRegistrados[jugadorId - 1];
-
-            if (jugador == null)
-            {
-                return new RespuestaMensaje
-                {
-                    TipoMensaje = TiposMensaje.Respuesta,
-                    Accion = Acciones.Conectar,
-                    JugadorId = jugadorId,
-                    Exito = false,
-                    Mensaje = "El jugador indicado no está registrado."
-                };
-            }
-
-            // Sustituimos el socket viejo por el nuevo
-            conexionesJugadores[jugadorId - 1] = writer;
-
-            Console.WriteLine($"Jugador reconectado: {jugador.nombre} - ID: {jugadorId}");
-
-            return new RespuestaMensaje
-            {
-                TipoMensaje = TiposMensaje.Respuesta,
-                Accion = Acciones.Conectar,
-                JugadorId = jugadorId,
-                Exito = true,
-                Mensaje = $"Jugador {jugador.nombre} reconectado correctamente."
-            };
-        }
-
-        private void RifarlosYCrearTurnos()
-        {
-            if (turnosInicializados)
-            {
-                return;
-            }
-
-            Jugador[] orden = new Jugador[MaxJugadores];
-
-            for (int i = 0; i < MaxJugadores; i++)
-            {
-                orden[i] = jugadoresRegistrados[i]!;
-            }
-
-            // Fisher-Yates
-            for (int i = orden.Length - 1; i > 0; i--)
-            {
-                int posicionAleatoria = random.Next(i + 1);
-
-                Jugador temporal = orden[i];
-
-                orden[i] = orden[posicionAleatoria];
-                orden[posicionAleatoria] = temporal;
-            }
-
-            Console.WriteLine();
-            Console.WriteLine("=== ORDEN DE TURNOS ===");
-
-            for (int i = 0; i < orden.Length; i++)
-            {
-                turnos.Encolar(orden[i]);
-
-                Console.WriteLine(
-                    $"{i + 1}. {orden[i].nombre}"
-                );
-            }
-
-            turnosInicializados = true;
-
-            Console.WriteLine("=======================");
-            Console.WriteLine();
-
-            numeroTurnoActual = 1;
-            dadosLanzadosEnTurno = false;
-
-            Console.WriteLine($"Comienza el turno {numeroTurnoActual}: {turnos.Actual().nombre}");
-        }
-
-        private async Task<RespuestaMensaje> ProcesarVincularRfidAsync(MensajeBase mensaje)
-        {
-            if (!mensaje.JugadorId.HasValue)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.JugadorNoEncontrado,
-                    "No se recibió el ID del jugador."
-                );
-            }
-
-            int jugadorId = mensaje.JugadorId.Value;
-
-            if (jugadorId < 1 || jugadorId > MaxJugadores)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.JugadorNoEncontrado,
-                    "El jugador indicado no existe."
-                );
-            }
-
-            Jugador? jugador = jugadoresRegistrados[jugadorId - 1];
-
-            if (jugador == null)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.JugadorNoEncontrado,
-                    "El jugador no está registrado."
-                );
-            }
-
-            if (hardwareWriter == null)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "No hay hardware RFID conectado."
-                );
-            }
-
-            if (jugadorPendienteRfid.HasValue)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "Ya existe un jugador esperando vincular una tarjeta RFID."
-                );
-            }
-
-            jugadorPendienteRfid = jugadorId;
-
-            bool enviado = await EnviarEsperarRfidHardwareAsync(jugadorId);
-
-            if (!enviado)
-            {
-                jugadorPendienteRfid = null;
-
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "No se pudo comunicar con el hardware RFID."
-                );
-            }
-
-            Console.WriteLine($"Jugador {jugador.nombre} esperando vinculación RFID.");
-
-            return new RespuestaMensaje
-            {
-                TipoMensaje = TiposMensaje.Respuesta,
-                Accion = Acciones.VincularRfid,
-                JugadorId = jugadorId,
-                Exito = true,
-                Mensaje = "Acerque una tarjeta al lector RFID."
-            };
-        }
-
-        private async Task<bool> EnviarEsperarRfidHardwareAsync(int jugadorId)
-        {
-            if (hardwareWriter == null)
-            {
-                return false;
-            }
-
-            MensajeBase mensaje = new MensajeBase
-            {
-                TipoMensaje = TiposMensaje.Notificacion,
-                Accion = Acciones.EsperarRfid,
-                JugadorId = jugadorId
-            };
-
-            string json = JsonSerializer.Serialize(mensaje, opcionesJson);
-
+            await candado.WaitAsync();
             try
             {
-                await hardwareWriter.WriteLineAsync(json);
-                Console.WriteLine($"Servidor esperando RFID para jugador {jugadorId}.");
+                for (int i = 0; i < conexionesJugadores.Length; i++)
+                {
+                    if (ReferenceEquals(conexionesJugadores[i], writer))
+                    {
+                        conexionesJugadores[i] = null;
+                        Console.WriteLine($"Jugador {i + 1} sin conexión (puede reconectarse con su ID).");
+                    }
+                }
 
-                return true;
+                if (ReferenceEquals(hardwareWriter, writer))
+                {
+                    hardwareWriter = null;
+                    Console.WriteLine("Se perdió la conexión con el hardware: pagos sin RFID.");
+                    ResultadoAccion r = juego.DesactivarRfid();
+                    await DifundirAsync(r);
+                }
             }
-            catch
+            finally
             {
-                // Si la Raspberry perdió conexión dejamos de considerarla activa.
-                hardwareWriter = null;
-
-                Console.WriteLine(
-                    "Se perdió la conexión con el hardware RFID."
-                );
-
-                return false;
+                candado.Release();
             }
         }
 
-        private async Task<RespuestaMensaje> ProcesarRfidDetectadoAsync(MensajeBase mensaje)
+       //  RFID
+        private async Task<ResultadoAccion> ProcesarVincularRfidAsync(int jugadorId)
         {
-            if (mensaje.Datos is not JsonElement datos)
+            if (hardwareWriter == null)
+                return ResultadoAccion.Error(CodigosError.AccionInvalida, "No hay hardware RFID conectado.");
+
+            ResultadoAccion resultado = juego.SolicitarVinculacionRfid(jugadorId);
+            if (!resultado.Exito) return resultado;
+
+            bool enviado = await EnviarAHardwareAsync(Acciones.EsperarRfid, jugadorId, null);
+            if (!enviado)
             {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "No se recibieron datos del RFID."
-                );
+                juego.CancelarVinculacionRfid();
+                return ResultadoAccion.Error(CodigosError.AccionInvalida, "No se pudo comunicar con el hardware RFID.");
             }
+            return resultado;
+        }
+
+        private ResultadoAccion ProcesarRfidDetectado(MensajeBase mensaje)
+        {
+            if (mensaje.Datos is not JsonElement datos || datos.ValueKind != JsonValueKind.Object)
+                return ResultadoAccion.Error(CodigosError.AccionInvalida, "No se recibieron datos del RFID.");
 
             DatosRfid? datosRfid = JsonSerializer.Deserialize<DatosRfid>(datos.GetRawText());
-
             if (datosRfid == null || string.IsNullOrWhiteSpace(datosRfid.UID))
+                return ResultadoAccion.Error(CodigosError.AccionInvalida, "El UID recibido no es válido.");
+
+            Console.WriteLine($"RFID detectado: {datosRfid.UID}");
+            return juego.ProcesarRfid(datosRfid.UID);
+        }
+
+        // =====================================================================
+        //  CONSULTAS
+        // =====================================================================
+
+        // Datos opcionales: { "FiltroJugadorId": 2, "Tipo": "PagoAlquiler", "DesdeInicio": false }
+        private ResultadoAccion ProcesarConsultarTransacciones(MensajeBase mensaje)
+        {
+            int? filtroJugador = null;
+            TipoTransaccion? filtroTipo = null;
+            bool desdeInicio = true;
+
+            if (mensaje.Datos is JsonElement datos && datos.ValueKind == JsonValueKind.Object)
             {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "El UID recibido no es válido."
-                );
+                if (datos.TryGetProperty("FiltroJugadorId", out JsonElement j) && j.ValueKind == JsonValueKind.Number)
+                    filtroJugador = j.GetInt32();
+
+                if (datos.TryGetProperty("Tipo", out JsonElement t) && t.ValueKind == JsonValueKind.String)
+                {
+                    if (!Enum.TryParse(t.GetString(), true, out TipoTransaccion tipo))
+                        return ResultadoAccion.Error(CodigosError.AccionInvalida, $"Tipo de transacción desconocido: {t.GetString()}");
+                    filtroTipo = tipo;
+                }
+
+                if (datos.TryGetProperty("DesdeInicio", out JsonElement o) &&
+                    (o.ValueKind == JsonValueKind.True || o.ValueKind == JsonValueKind.False))
+                    desdeInicio = o.GetBoolean();
             }
 
-            string uid = datosRfid.UID;
+            TransaccionDto[] transacciones = juego.ConsultarTransacciones(filtroJugador, filtroTipo, desdeInicio);
+            ResultadoAccion r = ResultadoAccion.Ok($"{transacciones.Length} transacciones.", new { Transacciones = transacciones });
+            r.NotificarEstado = false;
+            return r;
+        }
 
-            Console.WriteLine($"RFID detectado: {uid}");
+        // =====================================================================
+        //  ENVÍO
+        // =====================================================================
 
-            // Si nadie está intentando vincular una tarjeta,
-            // solamente reconocemos el RFID.
-            if (!jugadorPendienteRfid.HasValue)
+        // Después de cada acción exitosa: eventos -> todos, dados/pagos -> hardware, estado -> todos.
+        private async Task DifundirAsync(ResultadoAccion resultado)
+        {
+            if (resultado.Dados != null) //primero el dado físico
             {
-                return new RespuestaMensaje
+                await EnviarAHardwareAsync(Acciones.MostrarDado, null, resultado.Dados);
+            }
+
+            foreach (EventoJuego evento in resultado.Eventos)
+            {
+                MensajeBase notificacion = new MensajeBase
                 {
-                    TipoMensaje = TiposMensaje.Respuesta,
-                    Accion = Acciones.RfidDetectado,
-                    JugadorId = null,
-                    Exito = true,
-                    Mensaje = $"RFID detectado: {uid}"
+                    TipoMensaje = TiposMensaje.Notificacion,
+                    Accion = evento.Accion,
+                    JugadorId = evento.JugadorId,
+                    Datos = JsonSerializer.SerializeToElement(new { evento.Mensaje, Detalle = evento.Datos }, opcionesJson)
                 };
-            }
+                await EnviarATodosAsync(notificacion);
 
-            // Verificar que esa tarjeta no pertenezca ya
-            // a otro jugador.
-            for (int i = 0; i < cantidadJugadores; i++)
-            {
-                Jugador? registrado = jugadoresRegistrados[i];
-
-                if (registrado != null && registrado.tarjetaRfid == uid && registrado != jugadoresRegistrados[jugadorPendienteRfid.Value - 1])
+                // El hardware espera la tarjeta cuando alguien tiene que pagar
+                if (evento.Accion == Acciones.PagoPendiente)
                 {
-                    return CrearError(
-                        mensaje,
-                        CodigosError.AccionInvalida,
-                        "Esta tarjeta RFID ya está vinculada a otro jugador."
-                    );
+                    await EnviarAHardwareAsync(Acciones.EsperarRfid, evento.JugadorId, null);
                 }
             }
 
-            int jugadorId = jugadorPendienteRfid.Value;
-
-            Jugador? jugador = jugadoresRegistrados[jugadorId - 1];
-
-            if (jugador == null)
+            if (resultado.NotificarEstado)
             {
-                jugadorPendienteRfid = null;
-
-                return CrearError(
-                    mensaje,
-                    CodigosError.JugadorNoEncontrado,
-                    "No se encontró el jugador pendiente de vinculación."
-                );
+                await EnviarATodosAsync(new MensajeBase
+                {
+                    TipoMensaje = TiposMensaje.Notificacion,
+                    Accion = Acciones.EstadoActualizado,
+                    Datos = JsonSerializer.SerializeToElement(juego.ObtenerEstado(), opcionesJson)
+                });
             }
-
-            // Vinculación.
-            jugador.tarjetaRfid = uid;
-
-            jugadorPendienteRfid = null;
-
-            Console.WriteLine($"RFID {uid} vinculado al jugador " + $"{jugador.nombre} (ID {jugadorId}).");
-
-            await NotificarRfidVinculadoAsync(jugadorId, uid);
-
-            return new RespuestaMensaje
-            {
-                TipoMensaje = TiposMensaje.Respuesta,
-                Accion = Acciones.RfidDetectado,
-                JugadorId = jugadorId,
-                Exito = true,
-                Mensaje = $"RFID vinculado correctamente al jugador {jugador.nombre}."
-            };
         }
 
-        private async Task NotificarRfidVinculadoAsync(int jugadorId, string uid)
+        private async Task EnviarATodosAsync(MensajeBase mensaje)
         {
-            StreamWriter? writer = conexionesJugadores[jugadorId - 1];
-
-            if (writer == null)
-            {
-                return;
-            }
-
-            DatosRfid datosRfid = new DatosRfid
-            {
-                UID = uid
-            };
-
-            MensajeBase notificacion = new MensajeBase
-            {
-                TipoMensaje = TiposMensaje.Notificacion,
-                Accion = Acciones.RfidVinculado,
-                JugadorId = jugadorId,
-                Datos = JsonSerializer.SerializeToElement(datosRfid)
-            };
-
-            string json = JsonSerializer.Serialize(notificacion, opcionesJson);
-
-            await writer.WriteLineAsync(json);
-
-            Console.WriteLine($"Jugador {jugadorId} notificado de su RFID.");
-        }
-
-
-        private bool EsTurnoDe(int jugadorId)
-        {
-            if (!turnosInicializados)
-            {
-                return false;
-            }
-
-            if (jugadorId < 1 || jugadorId > MaxJugadores)
-            {
-                return false;
-            }
-
-            Jugador? jugador = jugadoresRegistrados[jugadorId - 1];
-
-            if (jugador == null)
-            {
-                return false;
-            }
-
-            return ReferenceEquals(turnos.Actual(), jugador);
-        }
-
-        private async Task<(int valor1, int valor2)> LanzarDadosDelTurnoAsync()
-        {
-            Jugador jugadorActual = turnos.Actual();
-
-            (int valor1, int valor2) = dado.Lanzar();
-
-            // Se marca ANTES de cualquier await.
-            dadosLanzadosEnTurno = true;
-
-            Console.WriteLine(
-                $"Turno {numeroTurnoActual} - " +
-                $"{jugadorActual.nombre} lanzó {valor1} y {valor2}."
-            );
-
-            await EnviarDadosHardwareAsync(valor1, valor2);
-
-            await NotificarDadosJugadoresAsync(
-                jugadorActual,
-                valor1,
-                valor2
-            );
-
-            return (valor1, valor2);
-        }
-
-        private async Task<RespuestaMensaje> ProcesarTirarDadosAsync(MensajeBase mensaje)
-        {
-            if (!turnosInicializados)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "Los turnos todavía no han sido inicializados."
-                );
-            }
-
-            if (!mensaje.JugadorId.HasValue)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.JugadorNoEncontrado,
-                    "No se recibió el ID del jugador."
-                );
-            }
-
-            int jugadorId = mensaje.JugadorId.Value;
-
-            if (jugadorId < 1 ||
-                jugadorId > MaxJugadores ||
-                jugadoresRegistrados[jugadorId - 1] == null)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.JugadorNoEncontrado,
-                    "El jugador indicado no existe."
-                );
-            }
-
-            if (!EsTurnoDe(jugadorId))
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.FueraDeTurno,
-                    "No es el turno de este jugador."
-                );
-            }
-
-            if (dadosLanzadosEnTurno)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.DadosYaLanzados,
-                    "Los dados ya fueron lanzados en este turno."
-                );
-            }
-
-            (int valor1, int valor2) =
-                await LanzarDadosDelTurnoAsync();
-
-            return new RespuestaMensaje
-            {
-                TipoMensaje = TiposMensaje.Respuesta,
-                Accion = Acciones.TirarDados,
-                JugadorId = jugadorId,
-                Exito = true,
-                Mensaje = $"Dados lanzados: {valor1} y {valor2}.",
-                Datos = JsonSerializer.SerializeToElement(
-                    new DatosDados
-                    {
-                        Valor1 = valor1,
-                        Valor2 = valor2
-                    }
-                )
-            };
-        }
-
-        private async Task ProcesarBotonPresionadoAsync()
-        {
-            if (!turnosInicializados)
-            {
-                Console.WriteLine("Botón ignorado: los turnos todavía no han iniciado.");
-                return;
-            }
-
-            if (dadosLanzadosEnTurno)
-            {
-                Console.WriteLine("Botón ignorado: los dados ya fueron lanzados en este turno.");
-                return;
-            }
-
-            await LanzarDadosDelTurnoAsync();
-        }
-
-        private async Task NotificarDadosJugadoresAsync(Jugador jugador, int valor1, int valor2)
-        {
-            int? jugadorId = ObtenerIdJugador(jugador);
-
-            DatosDados datosDados = new DatosDados
-            {
-                Valor1 = valor1,
-                Valor2 = valor2
-            };
-
-            MensajeBase notificacion = new MensajeBase
-            {
-                TipoMensaje = TiposMensaje.Notificacion,
-                Accion = Acciones.TirarDados,
-                JugadorId = jugadorId,
-                Datos = JsonSerializer.SerializeToElement(datosDados)
-            };
-
-            string json = JsonSerializer.Serialize(notificacion, opcionesJson);
-
             for (int i = 0; i < conexionesJugadores.Length; i++)
             {
                 StreamWriter? writer = conexionesJugadores[i];
-
-                if (writer == null)
+                if (writer == null) continue;
+                if (!await EnviarAsync(writer, mensaje))
                 {
-                    continue;
-                }
-
-                try
-                {
-                    await writer.WriteLineAsync(json);
-                }
-                catch
-                {
+                    conexionesJugadores[i] = null;
                     Console.WriteLine($"No se pudo notificar al jugador {i + 1}.");
                 }
             }
         }
 
-        private int? ObtenerIdJugador(Jugador jugador)
+        private async Task<bool> EnviarAHardwareAsync(string accion, int? jugadorId, object? datos)
         {
-            for (int i = 0; i < jugadoresRegistrados.Length; i++)
+            if (hardwareWriter == null) return false;
+
+            MensajeBase mensaje = new MensajeBase
             {
-                if (ReferenceEquals(jugadoresRegistrados[i], jugador))
-                {
-                    return i + 1;
-                }
-            }
-
-            return null;
-        }
-
-        private RespuestaMensaje ProcesarTerminarTurno(MensajeBase mensaje)
-        {
-            if (!turnosInicializados)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "Los turnos todavía no han sido inicializados."
-                );
-            }
-
-            if (!mensaje.JugadorId.HasValue)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.JugadorNoEncontrado,
-                    "No se recibió el ID del jugador."
-                );
-            }
-
-            int jugadorId = mensaje.JugadorId.Value;
-
-            if (jugadorId < 1 || jugadorId > MaxJugadores || jugadoresRegistrados[jugadorId - 1] == null)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.JugadorNoEncontrado,
-                    "El jugador indicado no existe."
-                );
-            }
-
-            if (!EsTurnoDe(jugadorId))
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.FueraDeTurno,
-                    "No es el turno de este jugador."
-                );
-            }
-
-            if (!dadosLanzadosEnTurno)
-            {
-                return CrearError(
-                    mensaje,
-                    CodigosError.AccionInvalida,
-                    "Debe lanzar los dados antes de terminar el turno."
-                );
-            }
-
-            Jugador jugadorAnterior = turnos.Actual();
-
-            Jugador siguienteJugador = turnos.AvanzarTurno();
-
-            dadosLanzadosEnTurno = false;
-            numeroTurnoActual++;
-
-            int? siguienteJugadorId = ObtenerIdJugador(siguienteJugador);
-
-            Console.WriteLine($"Turno de {jugadorAnterior.nombre} terminado.");
-
-            Console.WriteLine($"Turno {numeroTurnoActual}: {siguienteJugador.nombre}");
-
-            return new RespuestaMensaje
-            {
-                TipoMensaje = TiposMensaje.Respuesta,
-                Accion = Acciones.TerminarTurno,
+                TipoMensaje = TiposMensaje.Notificacion,
+                Accion = accion,
                 JugadorId = jugadorId,
-                Exito = true,
-                Mensaje =
-                    $"Turno terminado. Ahora juega {siguienteJugador.nombre}.",
-                Datos = JsonSerializer.SerializeToElement(new
-                {
-                    NumeroTurno = numeroTurnoActual,
-                    SiguienteJugadorId = siguienteJugadorId,
-                    SiguienteJugador = siguienteJugador.nombre
-                }
-                )
+                Datos = datos != null ? JsonSerializer.SerializeToElement(datos, opcionesJson) : null
             };
+
+            if (await EnviarAsync(hardwareWriter, mensaje)) return true;
+
+            hardwareWriter = null;
+            Console.WriteLine("Se perdió la conexión con el hardware.");
+            return false;
         }
 
-        private RespuestaMensaje ProcesarConsultarEstado(MensajeBase mensaje)
+        private async Task<bool> EnviarAsync(StreamWriter writer, MensajeBase mensaje)
         {
-            var jugadores = new List<object>();
-
-            for (int i = 0; i < jugadoresRegistrados.Length; i++)
+            try
             {
-                Jugador? jugador = jugadoresRegistrados[i];
-
-                if (jugador == null)
-                {
-                    continue;
-                }
-
-                jugadores.Add(new
-                {
-                    Id = jugador.id,
-                    Nombre = jugador.nombre,
-                    Saldo = jugador.saldo,
-                    Posicion = jugador.posicionActual,
-                    Activo = jugador.activo,
-                    TarjetaRfid = jugador.tarjetaRfid
-                });
+                string json = JsonSerializer.Serialize(mensaje, mensaje.GetType(), opcionesJson);
+                await writer.WriteLineAsync(json);
+                Console.WriteLine($"Enviado: {json}");
+                return true;
             }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private RespuestaMensaje CrearRespuesta(string accion, int? jugadorId, ResultadoAccion resultado)
+        {
+            if (!resultado.Exito)
+                return CrearError(accion, jugadorId, resultado.Codigo, resultado.Mensaje);
 
             return new RespuestaMensaje
             {
                 TipoMensaje = TiposMensaje.Respuesta,
-                Accion = Acciones.ConsultarEstado,
-                JugadorId = mensaje.JugadorId,
+                Accion = accion,
+                JugadorId = resultado.JugadorId ?? jugadorId,
                 Exito = true,
-                Mensaje = "Estado de los jugadores consultado correctamente.",
-                Datos = JsonSerializer.SerializeToElement(new{Jugadores = jugadores})
+                Mensaje = resultado.Mensaje,
+                Datos = resultado.Datos != null ? JsonSerializer.SerializeToElement(resultado.Datos, resultado.Datos.GetType(), opcionesJson) : null
             };
         }
 
-
-        private RespuestaMensaje CrearError(MensajeBase mensaje, string codigo, string descripcion)
+        private RespuestaMensaje CrearError(string accion, int? jugadorId, string codigo, string descripcion)
         {
             return new RespuestaMensaje
             {
                 TipoMensaje = TiposMensaje.Respuesta,
-                Accion = mensaje.Accion,
-                JugadorId = mensaje.JugadorId,
+                Accion = accion,
+                JugadorId = jugadorId,
                 Exito = false,
                 Mensaje = descripcion,
                 Datos = JsonSerializer.SerializeToElement(new { Codigo = codigo })
             };
-        }
-
-        private async Task EnviarDadosHardwareAsync(int valor1, int valor2)
-        {
-            if (hardwareWriter == null)
-            {
-                Console.WriteLine("No hay hardware conectado.");
-                return;
-            }
-
-            DatosDados datosDados = new DatosDados
-            {
-                Valor1 = valor1,
-                Valor2 = valor2
-            };
-
-            MensajeBase notificacion = new MensajeBase
-            {
-                TipoMensaje = TiposMensaje.Notificacion,
-                Accion = Acciones.MostrarDado,
-                JugadorId = null,
-                Datos = JsonSerializer.SerializeToElement(datosDados)
-            };
-
-            string json = JsonSerializer.Serialize(notificacion, opcionesJson);
-
-            try
-            {
-                await hardwareWriter.WriteLineAsync(json);
-
-                Console.WriteLine($"Enviado a Raspberry: {json}");
-            }
-            catch
-            {
-                hardwareWriter = null;
-
-                Console.WriteLine("Se perdió la conexión con el hardware.");
-            }
         }
     }
 }

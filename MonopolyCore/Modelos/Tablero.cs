@@ -26,6 +26,25 @@ public class Tablero
         int nuevaPosicion = ((posicionActual + pasos) % total + total)% total;
         return nuevaPosicion;
     }
+    //Mueve nodo por nodo sobre la lista circular (Siguiente si pasos > 0, Anterior si pasos < 0)
+    //y devuelve las posiciones visitadas en orden. La última es la casilla de llegada.
+    public int[] RecorrerDesde(int posicionActual, int pasos)
+    {
+        int cantidadPasos = Math.Abs(pasos);
+        int[] recorrido = new int[cantidadPasos];
+        NodoDoble<Casilla> nodo = casillas.ObtenerNodoEnPosicion(posicionActual);
+
+        for (int i = 0; i < cantidadPasos; i++)
+        {
+            nodo = pasos > 0 ? casillas.Siguiente(nodo) : casillas.Anterior(nodo);
+            recorrido[i] = nodo.Valor.Posicion;
+        }
+        return recorrido;
+    }
+    public IEnumerable<Casilla> Recorrer() //recorre todas las casillas desde Inicio
+    {
+        return casillas.Recorrer();
+    }
     public bool PasoPorInicio(int posicionAnterior, int posicionNueva) //metodo que retorna true o false dependiendo de si el jugador pasó por el inicio o no
     {
         return posicionNueva < posicionAnterior;

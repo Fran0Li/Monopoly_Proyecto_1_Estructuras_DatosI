@@ -20,7 +20,10 @@ public enum TipoEfectoEvento
     PerderDinero,
     Moverse,
     IrACarcel,
-    SalirDeCarcelGratis
+    SalirDeCarcelGratis,
+    Retroceder,
+    IrACasilla,
+    PerderTurno
 }
 
 public enum TipoTransaccion
