@@ -1,4 +1,6 @@
 namespace MonopolyCore.Modelos {
+
+    // Enumeraciones para representar los diferentes tipos de casillas, efectos de eventos, transacciones y estados del juego
 public enum TipoCasilla
 {
     Propiedad,
