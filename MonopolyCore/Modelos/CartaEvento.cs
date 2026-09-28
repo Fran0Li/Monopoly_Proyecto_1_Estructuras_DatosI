@@ -1,11 +1,12 @@
 namespace MonopolyCore.Modelos {
 public class CartaEvento
 {
-    private int id;
-    private string descripcion;
-    private TipoEfectoEvento tipoEfecto;
+    private int id; // Identificador único de la carta de evento
+    private string descripcion; // Descripción del efecto de la carta de evento
+    private TipoEfectoEvento tipoEfecto;// Tipo de efecto que tiene la carta de evento (por ejemplo, pagar, recibir, avanzar, retroceder, etc.)
     private decimal valor;
 
+//getters y setters
     public int Id
     {
         get { return id; }
@@ -27,6 +28,7 @@ public class CartaEvento
         get { return valor; }
         set { valor = value; }
     }
+    //constructor
 
     public CartaEvento(int id, string descripcion, TipoEfectoEvento tipoEfecto, decimal valor)
     {

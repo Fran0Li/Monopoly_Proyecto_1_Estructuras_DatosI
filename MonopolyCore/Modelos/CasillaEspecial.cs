@@ -1,9 +1,8 @@
 namespace MonopolyCore.Modelos {
-public class CasillaEspecial : Casilla
+public class CasillaEspecial : Casilla //hereda de la clase Casilla
 {
-    private TipoCasillaEspecial tipoespecial;
-
-    public TipoCasillaEspecial TipoEspecial
+    private TipoCasillaEspecial tipoespecial; //tipo de casilla especial
+    public TipoCasillaEspecial TipoEspecial // getter y setter del tipo de casilla especial
     {
         get { return tipoespecial; }
         set { tipoespecial = value; }
@@ -15,6 +14,7 @@ public class CasillaEspecial : Casilla
         get { return monto; }
         set { monto = value; }
     }
+    //constructor de la clase CasillaEspecial, recibe el id, nombre, posicion, tipo de la casilla especial y monto (solo Impuesto)
     public CasillaEspecial(int id, string nombre, int posicion, TipoCasillaEspecial tipoespecial, int monto = 0)
         : base(id, nombre, posicion, TipoCasilla.Especial)
     {
