@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.IO;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Windows.Forms;
@@ -30,6 +31,16 @@ namespace MonopolyCliente.Interfaz
 
         private readonly ToolTip ayuda = new ToolTip();
         private int casillaBajoMouse = -1;
+
+        // Imágenes opcionales (carpeta "Imagenes" junto al .exe):
+        //   casilla_N.png → se muestra en el centro cuando un jugador cae en la casilla N
+        //   logo.png      → reemplaza el texto "MONOPOLY TEC" del centro
+        private int casillaMostrada = -1;   // última casilla donde cayó alguien
+        private int jugadorQueCayo;
+        private Image?[] imagenes = new Image?[0];
+        private bool[] imagenCargada = new bool[0];
+        private Image? logo;
+        private bool logoCargado;
 
         public TableroControl()
         {
@@ -93,7 +104,12 @@ namespace MonopolyCliente.Interfaz
                 }
                 posicionAnimada[id] = recorrido[pasoActual[id]];
                 pasoActual[id]++;
-                if (pasoActual[id] >= recorrido.Length) recorridos[id] = null;
+                if (pasoActual[id] >= recorrido.Length)
+                {
+                    recorridos[id] = null;
+                    casillaMostrada = recorrido[recorrido.Length - 1]; // llegó: se muestra la imagen de esa casilla
+                    jugadorQueCayo = id;
+                }
                 algunoSeMueve = true;
             }
             if (!algunoSeMueve) temporizador.Stop();
@@ -244,31 +260,130 @@ namespace MonopolyCliente.Interfaz
         private void DibujarCentro(Graphics g, float c, float lado)
         {
             RectangleF centro = new RectangleF(c, c, lado - 2 * c, lado - 2 * c);
+            float xCentro = centro.X + centro.Width / 2;
+            Image? foto = ImagenDeCasilla(casillaMostrada);
 
-            using (Font titulo = new Font("Segoe UI", Math.Max(14f, c / 3.2f), FontStyle.Bold))
-            using (Font subtitulo = new Font("Segoe UI", Math.Max(8f, c / 9f), FontStyle.Italic))
             using (SolidBrush azul = new SolidBrush(Colores.AzulTec))
             using (StringFormat centrado = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            using (Font info = new Font("Segoe UI", Math.Max(9f, c / 7.5f), FontStyle.Bold))
             {
-                RectangleF rTitulo = new RectangleF(centro.X, centro.Y + centro.Height * 0.12f, centro.Width, centro.Height * 0.16f);
-                g.DrawString("MONOPOLY TEC", titulo, azul, rTitulo, centrado);
-                RectangleF rSub = new RectangleF(centro.X, rTitulo.Bottom, centro.Width, centro.Height * 0.07f);
-                g.DrawString("Edición Instituto Tecnológico de Costa Rica", subtitulo, Brushes.DimGray, rSub, centrado);
+                float tamDado, yDados;
+
+                if (foto != null)
+                {
+                    // Con imagen: foto de la casilla donde cayó el último jugador + leyenda
+                    RectangleF caja = new RectangleF(centro.X + centro.Width * 0.08f, centro.Y + centro.Height * 0.04f, centro.Width * 0.84f, centro.Height * 0.46f);
+                    RectangleF rFoto = Ajustar(foto, caja);
+                    g.DrawImage(foto, rFoto);
+                    using (Pen marco = new Pen(Colores.AzulTec, 2f)) g.DrawRectangle(marco, rFoto.X, rFoto.Y, rFoto.Width, rFoto.Height);
+
+                    RectangleF rLeyenda = new RectangleF(centro.X, caja.Bottom + c * 0.05f, centro.Width, centro.Height * 0.08f);
+                    g.DrawString(LeyendaCaida(), info, azul, rLeyenda, centrado);
+
+                    tamDado = c * 0.6f;
+                    yDados = rLeyenda.Bottom + c * 0.1f;
+                }
+                else
+                {
+                    // Sin imagen: título (o logo.png si existe) + subtítulo
+                    RectangleF rTitulo = new RectangleF(centro.X, centro.Y + centro.Height * 0.12f, centro.Width, centro.Height * 0.16f);
+                    RectangleF rSub = new RectangleF(centro.X, rTitulo.Bottom, centro.Width, centro.Height * 0.07f);
+                    Image? imagenLogo = Logo();
+                    if (imagenLogo != null)
+                    {
+                        g.DrawImage(imagenLogo, Ajustar(imagenLogo, new RectangleF(centro.X, centro.Y + centro.Height * 0.06f, centro.Width, centro.Height * 0.3f)));
+                    }
+                    else
+                    {
+                        using (Font titulo = new Font("Segoe UI", Math.Max(14f, c / 3.2f), FontStyle.Bold))
+                        using (Font subtitulo = new Font("Segoe UI", Math.Max(8f, c / 9f), FontStyle.Italic))
+                        {
+                            g.DrawString("MONOPOLY TEC", titulo, azul, rTitulo, centrado);
+                            g.DrawString("Edición Instituto Tecnológico de Costa Rica", subtitulo, Brushes.DimGray, rSub, centrado);
+                        }
+                    }
+                    tamDado = c * 0.75f;
+                    yDados = centro.Y + centro.Height * 0.42f;
+                }
 
                 // Dados
-                float tamDado = c * 0.75f;
-                float yDados = centro.Y + centro.Height * 0.42f;
-                float xCentro = centro.X + centro.Width / 2;
                 DibujarDado(g, new RectangleF(xCentro - tamDado - c * 0.12f, yDados, tamDado, tamDado), dado1);
                 DibujarDado(g, new RectangleF(xCentro + c * 0.12f, yDados, tamDado, tamDado), dado2);
 
                 // Estado de la partida
-                using (Font info = new Font("Segoe UI", Math.Max(9f, c / 7.5f), FontStyle.Bold))
+                RectangleF rInfo = new RectangleF(centro.X, yDados + tamDado + c * 0.12f, centro.Width, centro.Height * 0.1f);
+                g.DrawString(TextoCentral(), info, azul, rInfo, centrado);
+            }
+        }
+
+        private string LeyendaCaida()
+        {
+            string casilla = estado != null && casillaMostrada >= 0 && casillaMostrada < estado.Casillas.Length
+                ? estado.Casillas[casillaMostrada].Nombre : "";
+            string jugador = NombreDe(jugadorQueCayo);
+            return jugador.Length > 0 ? $"{jugador} cayó en {casilla}" : casilla;
+        }
+
+        // ---------- Carga de imágenes (se leen una sola vez) ----------
+
+        private Image? ImagenDeCasilla(int p)
+        {
+            if (p < 0) return null;
+            if (imagenes.Length < CantidadCasillas)
+            {
+                imagenes = new Image?[CantidadCasillas];
+                imagenCargada = new bool[CantidadCasillas];
+            }
+            if (p >= imagenes.Length) return null;
+            if (!imagenCargada[p])
+            {
+                imagenes[p] = CargarImagen($"casilla_{p}");
+                imagenCargada[p] = true;
+            }
+            return imagenes[p];
+        }
+
+        private Image? Logo()
+        {
+            if (!logoCargado)
+            {
+                logo = CargarImagen("logo");
+                logoCargado = true;
+            }
+            return logo;
+        }
+
+        // Busca Imagenes/nombre.png|.jpg|.jpeg junto al ejecutable. Si no existe, devuelve null.
+        private static Image? CargarImagen(string nombre)
+        {
+            string carpeta = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Imagenes");
+            string[] extensiones = { ".png", ".jpg", ".jpeg" };
+            foreach (string ext in extensiones)
+            {
+                string ruta = Path.Combine(carpeta, nombre + ext);
+                if (!File.Exists(ruta)) continue;
+                try
                 {
-                    RectangleF rInfo = new RectangleF(centro.X, yDados + tamDado + c * 0.2f, centro.Width, centro.Height * 0.12f);
-                    g.DrawString(TextoCentral(), info, azul, rInfo, centrado);
+                    using (FileStream archivo = File.OpenRead(ruta))
+                    using (Image original = Image.FromStream(archivo))
+                    {
+                        return new Bitmap(original); // copia en memoria: no deja el archivo bloqueado
+                    }
+                }
+                catch (Exception)
+                {
+                    return null; // imagen dañada: se ignora
                 }
             }
+            return null;
+        }
+
+        // Rectángulo donde cabe la imagen sin deformarse, centrado en la caja
+        private static RectangleF Ajustar(Image imagen, RectangleF caja)
+        {
+            float escala = Math.Min(caja.Width / imagen.Width, caja.Height / imagen.Height);
+            float ancho = imagen.Width * escala, alto = imagen.Height * escala;
+            return new RectangleF(caja.X + (caja.Width - ancho) / 2, caja.Y + (caja.Height - alto) / 2, ancho, alto);
         }
 
         private string TextoCentral()
@@ -394,6 +509,8 @@ namespace MonopolyCliente.Interfaz
             if (disposing)
             {
                 temporizador.Dispose();
+                foreach (Image? imagen in imagenes) imagen?.Dispose();
+                logo?.Dispose();
                 ayuda.Dispose();
             }
             base.Dispose(disposing);
