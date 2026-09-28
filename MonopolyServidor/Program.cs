@@ -6,7 +6,7 @@ using MonopolyServidor.Comunicacion;
 Juego juego = new Juego(
     saldoInicial: 1500,
     premioPorInicio: 200,
-    maxTurnos: 60,
+    maxTurnos: 8,
     minJugadores: 2);
 
 ServidorTcp servidor = new ServidorTcp(5000, juego);

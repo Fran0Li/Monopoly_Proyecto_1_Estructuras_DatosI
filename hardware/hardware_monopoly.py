@@ -55,8 +55,15 @@ def enviar_mensaje(sock, mensaje_dict):
     # NDJSON: el mensaje va como JSON de una sola línea, terminado en \n,
     # para que el servidor sepa dónde termina un mensaje y empieza el siguiente
     texto = ujson.dumps(mensaje_dict) + "\n"
-    sock.send(texto.encode("utf-8"))
-    print("Enviado:", texto.strip())
+    try:
+        sock.send(texto.encode("utf-8"))
+        print("Enviado:", texto.strip())
+    except OSError:
+        print("No se pudo enviar: conexión perdida")
+        raise ConexionPerdida()
+
+class ConexionPerdida(Exception): #se lanza cuando el server cierra o se cae la red
+    pass
 
 
 # DISPLAYS DE 7 SEGMENTOS
@@ -80,7 +87,15 @@ DIGITOS = {
     4: ['f', 'g', 'b', 'c'],
     5: ['a', 'f', 'g', 'c', 'd'],
     6: ['a', 'f', 'g', 'e', 'c', 'd'],
+    0: ['a', 'b', 'c', 'd', 'e', 'f'],  # "00" = tarjeta aceptada
+    '-': ['g'],                         # "--" = esperando tarjeta
+    'E': ['a', 'd', 'e', 'f', 'g'],     # "EE" = tarjeta rechazada
 }
+
+ultimo_dado = (None, None)   # últimos valores del dado, para volver a mostrarlos
+esperando_tarjeta = False    # True mientras el server espera una tarjeta (vincular o pagar)
+ultimo_cambio_ms = 0         # para alternar dado / "--" sin bloquear el loop
+mostrando_guiones = False
 
 def mostrar_numero(segmentos, n):
     for pin in segmentos.values():#Apaga todo primero 
@@ -92,17 +107,42 @@ def apagar_display(segmentos):
     for pin in segmentos.values():
         pin.value(0)
 
-def parpadear_espera_rfid():
-    # Feedback visual simple mientras el servidor espera que acerquemos
-    # una tarjeta para vincular (Accion: ESPERAR_RFID). No bloquea el
-    # loop principal por mucho tiempo -- solo un parpadeo cortito.
-    for _ in range(3):
-        mostrar_numero(segmentos_1, 1)
-        mostrar_numero(segmentos_2, 1)
-        time.sleep_ms(150)
+def mostrar_par(v1, v2): # muestra un símbolo en cada display
+    mostrar_numero(segmentos_1, v1)
+    mostrar_numero(segmentos_2, v2)
+
+def mostrar_ultimo_dado(): # vuelve a dejar el dado en pantalla (o apagado si no hay)
+    if ultimo_dado[0] is None:
         apagar_display(segmentos_1)
         apagar_display(segmentos_2)
-        time.sleep_ms(150)
+    else:
+        mostrar_par(ultimo_dado[0], ultimo_dado[1])
+
+def actualizar_espera_tarjeta():
+    # Mientras se espera tarjeta alterna cada 700 ms entre el dado y "--",
+    # así se sigue viendo el dado. No usa sleep: no bloquea el loop.
+    global ultimo_cambio_ms, mostrando_guiones
+    if not esperando_tarjeta:
+        return
+    ahora = time.ticks_ms()
+    if time.ticks_diff(ahora, ultimo_cambio_ms) >= 700:
+        ultimo_cambio_ms = ahora
+        mostrando_guiones = not mostrando_guiones
+        if mostrando_guiones:
+            mostrar_par('-', '-')
+        else:
+            mostrar_ultimo_dado()
+
+def mostrar_resultado_tarjeta(exito):
+    # Feedback cortito después de pasar la tarjeta: "00" aceptada, "EE" rechazada
+    global esperando_tarjeta
+    if exito:
+        esperando_tarjeta = False
+        mostrar_par(0, 0)
+    else:
+        mostrar_par('E', 'E') # sigue esperando: puede pasar la tarjeta correcta
+    time.sleep_ms(800)
+    mostrar_ultimo_dado()
 
 
 # RFID 
@@ -168,6 +208,8 @@ def revisar_mensajes_servidor(sock):
     sock.settimeout(0.05)  # no bloquear el loop principal
     try:
         datos = sock.recv(1024)
+        if not datos: # recv vacío = el servidor cerró la conexión
+            raise ConexionPerdida()
         if datos:
             buffer_entrada += datos
             # Puede llegar más de un mensaje pegado en un solo recv(),
@@ -177,7 +219,7 @@ def revisar_mensajes_servidor(sock):
                 if linea.strip():
                     procesar_mensaje(linea)
     except OSError:
-        pass  # no llegó nada nuevo, normal
+        pass  # no llegó nada nuevo (timeout), normal
 
 def procesar_mensaje(linea_bytes):
     try:
@@ -190,23 +232,36 @@ def procesar_mensaje(linea_bytes):
         print("Mensaje mal formado, se ignora:", linea_bytes)
         return
 
+    global ultimo_dado, esperando_tarjeta
     accion = mensaje.get("Accion")
+    tipo = mensaje.get("TipoMensaje")
 
     if accion == "MOSTRAR_DADO": # Raspy solo muestra, el numero lo genera el server 
-        datos = mensaje.get("Datos", {})
+        datos = mensaje.get("Datos") or {}
         valor1 = datos.get("Valor1")
         valor2 = datos.get("Valor2")
         print("Servidor pidió mostrar dado:", valor1, valor2)
-        mostrar_numero(segmentos_1, valor1)
-        mostrar_numero(segmentos_2, valor2)
+        ultimo_dado = (valor1, valor2)
+        esperando_tarjeta = False # tirada nueva: se limpia cualquier espera vieja (ej. compra cancelada)
+        mostrar_par(valor1, valor2)
 
     elif accion == "ESPERAR_RFID":
-        print("Servidor pidió esperar tarjeta para vincular...")
-        parpadear_espera_rfid()
-        # A partir de aquí, la próxima lectura de RFID_DETECTADO
-        # que mandemos, el servidor la va a interpretar como la
-        # vinculación pendiente la Pico no necesita saber nada
-        # de esto, solo sigue leyendo tarjetas como siempre.
+        # Llega en dos casos: un jugador quiere VINCULAR su tarjeta, o
+        # un jugador DEBE PAGAR (compra, alquiler, impuesto, carta).
+        # La Pico no necesita saber cuál: solo avisa con "--" y sigue
+        # leyendo tarjetas; el servidor decide qué hacer con el UID.
+        print("Servidor espera una tarjeta (vincular o pagar), jugador:", mensaje.get("JugadorId"))
+        esperando_tarjeta = True
+
+    elif tipo == "Respuesta" and accion == "RFID_DETECTADO":
+        # El servidor contesta si aceptó la tarjeta (Exito) y por qué (Mensaje)
+        exito = mensaje.get("Exito", False)
+        print("Tarjeta", "aceptada:" if exito else "rechazada:", mensaje.get("Mensaje"))
+        if esperando_tarjeta:
+            mostrar_resultado_tarjeta(exito)
+
+    elif tipo == "Respuesta" and accion == "CONECTAR":
+        print("Servidor:", mensaje.get("Mensaje"))
 
     else:
         print("Mensaje recibido, acción no manejada:", accion)
@@ -215,20 +270,39 @@ def procesar_mensaje(linea_bytes):
 # PROGRAMA PRINCIPAL
 
 def main():
+    global esperando_tarjeta, buffer_entrada
     if not conectar_wifi():
         return 
 
-    sock = conectar_servidor()
     apagar_display(segmentos_1)
     apagar_display(segmentos_2)
 
-    print("Listo. Esperando mensajes del servidor...")
-    
-    while True:
-        revisar_mensajes_servidor(sock)
-        revisar_boton(sock)
-        revisar_rfid(sock)   
+    while True: # si se cae la conexión, vuelve a intentar cada 3 s
+        try:
+            sock = conectar_servidor()
+        except (OSError, ConexionPerdida):
+            print("Servidor no disponible, reintentando en 3 s...")
+            time.sleep(3)
+            continue
 
-        time.sleep_ms(100)
+        buffer_entrada = b""
+        esperando_tarjeta = False
+        print("Listo. Esperando mensajes del servidor...")
+
+        try:
+            while True:
+                revisar_mensajes_servidor(sock)
+                revisar_boton(sock)
+                revisar_rfid(sock)
+                actualizar_espera_tarjeta()
+
+                time.sleep_ms(100)
+        except ConexionPerdida:
+            print("Conexión con el servidor perdida. Reconectando...")
+            try:
+                sock.close()
+            except OSError:
+                pass
+            time.sleep(3)
 
 main()
