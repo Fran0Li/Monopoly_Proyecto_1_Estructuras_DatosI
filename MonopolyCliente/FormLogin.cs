@@ -91,10 +91,24 @@ namespace MonopolyCliente
             {
                 // ClienteMonopoly ya guardó el JugadorId internamente.
                 MostrarEstado($"Conectado como jugador {cliente.JugadorId}. {respuesta.Mensaje}");
-
-                // Acá, más adelante, se abrirá FormJuego pasándole
-                // la instancia de "cliente" y se cerrará este formulario.
+                AbrirJuego();
             }
+        }
+
+        /// Pasa la conexión ya abierta a FormJuego y oculta el login.
+        /// Se ejecuta dentro de Invoke (sincrónico): el hilo del socket espera a que
+        /// FormJuego se suscriba, así no se pierde ninguna notificación.
+        private void AbrirJuego()
+        {
+            cliente.RespuestaRecibida -= AlRecibirRespuesta;
+            cliente.NotificacionRecibida -= AlRecibirNotificacion;
+            cliente.ErrorDeConexion -= AlFallarConexion;
+            cliente.Desconectado -= AlDesconectarse;
+
+            FormJuego juego = new FormJuego(cliente, txtNombre.Text.Trim(), $"{txtIp.Text.Trim()}:{txtPuerto.Text.Trim()}");
+            juego.FormClosed += (s, e) => Close(); // al cerrar el juego se cierra la aplicación
+            Hide();
+            juego.Show();
         }
 
         /// Llega una Notificacion (el servidor avisa algo sin que lo pidiéramos).
