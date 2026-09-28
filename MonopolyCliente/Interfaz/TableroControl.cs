@@ -295,11 +295,11 @@ namespace MonopolyCliente.Interfaz
                     }
                     else
                     {
-                        using (Font titulo = new Font("Segoe UI", Math.Max(14f, c / 3.2f), FontStyle.Bold))
-                        using (Font subtitulo = new Font("Segoe UI", Math.Max(8f, c / 9f), FontStyle.Italic))
+                        using (Font titulo = new Font("Bahnschrift SemiBold", Math.Max(14f, c / 3.2f), FontStyle.Bold))
+                        using (Font subtitulo = new Font("Bahnschrift SemiBold", Math.Max(8f, c / 9f), FontStyle.Italic))
                         {
                             g.DrawString("MONOPOLY TEC", titulo, azul, rTitulo, centrado);
-                            g.DrawString("Edición Instituto Tecnológico de Costa Rica", subtitulo, Brushes.DimGray, rSub, centrado);
+                            g.DrawString("Edición TEC aura", subtitulo, Brushes.DimGray, rSub, centrado);
                         }
                     }
                     tamDado = c * 0.75f;
