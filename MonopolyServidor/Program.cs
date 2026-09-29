@@ -4,10 +4,10 @@ using MonopolyServidor.Comunicacion;
 // Configuración de la partida (ajustable para la demo).
 // minJugadores: 4 para la defensa; 2 sirve para probar con menos compus.
 Juego juego = new Juego(
-    saldoInicial: 1500,
-    premioPorInicio: 200,
-    maxTurnos: 20,
-    minJugadores: 4);
+    saldoInicial: 300,
+    premioPorInicio: 67,
+    maxTurnos: 15,
+    minJugadores: 2);
 
 ServidorTcp servidor = new ServidorTcp(5000, juego);
 

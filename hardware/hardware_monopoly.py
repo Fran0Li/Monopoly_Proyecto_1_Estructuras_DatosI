@@ -8,9 +8,9 @@ from machine import Pin
 # CONFIGURACIÓN 
 
 WIFI_SSID = "FranLi"
-WIFI_PASSWORD = "********"
+WIFI_PASSWORD = "Lrf291424"
 
-SERVIDOR_IP = "10.154.57.206"   #  cambiar para las pruebas
+SERVIDOR_IP = "10.189.144.206"   #  cambiar para las pruebas
 SERVIDOR_PUERTO = 5000           # puerto correcto
 
 
