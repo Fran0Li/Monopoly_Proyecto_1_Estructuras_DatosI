@@ -9,8 +9,14 @@ using System.Text.Json;
 
 namespace MonopolyServidor.Comunicacion
 {
-    // Capa de transporte. NO tiene reglas de juego: todo eso vive en Juego (MonopolyCore).
-    // Por cada mensaje: valida quién lo manda -> llama a Juego -> responde -> notifica a todos.
+    // Servidor TCP encargado de la comunicación entre los clientes, el hardware
+    // Raspberry Pi y la lógica central del juego.
+    //
+    // Su responsabilidad es recibir mensajes, validar su origen, delegar las
+    // acciones a Juego y enviar las respuestas o notificaciones correspondientes.
+    //
+    // Las reglas del Monopoly y las modificaciones del estado oficial no se
+    // realizan aquí; esas responsabilidades pertenecen a Juego y Banco.
     public class ServidorTcp
     {
         private readonly TcpListener listener;
@@ -19,17 +25,19 @@ namespace MonopolyServidor.Comunicacion
 
         private readonly Juego juego;
 
-        // Conexión de cada jugador (índice = id - 1) y de la Raspberry
+        // Configuración de la partida (ajustable para la demo).
+        // minJugadores: 4 para la defensa; 2 sirve para probar con menos compus.
         private readonly StreamWriter?[] conexionesJugadores = new StreamWriter?[Juego.MaxJugadores];
         private StreamWriter? hardwareWriter;
 
-        // Un mensaje a la vez: evita que dos clientes (o botón + cliente) modifiquen el estado
-        // al mismo tiempo y que dos escrituras se mezclen en el mismo socket.
-        // SemaphoreSlim y no lock porque adentro hay await.
+        // Se utiliza SemaphoreSlim porque el procesamiento contiene operaciones
+        // asíncronas. Esto evita modificaciones simultáneas del estado y escrituras
+        // concurrentes sobre las conexiones.
         private readonly SemaphoreSlim candado = new SemaphoreSlim(1, 1);
 
         public ServidorTcp(int puerto) : this(puerto, new Juego()) { }
 
+        //Constructor
         public ServidorTcp(int puerto, Juego juego)
         {
             this.puerto = puerto;
@@ -37,13 +45,14 @@ namespace MonopolyServidor.Comunicacion
             listener = new TcpListener(IPAddress.Any, puerto);
         }
 
+        //Mensaje de inicio del servidor
         public async Task IniciarAsync()
         {
             listener.Start();
             Console.WriteLine($"Servidor iniciado en el puerto {puerto}");
             Console.WriteLine("Esperando conexiones...");
 
-            while (true)
+            while (true) // mensaje de cliente entrante
             {
                 TcpClient cliente = await listener.AcceptTcpClientAsync();
                 Console.WriteLine("Nuevo cliente conectado.");
@@ -51,6 +60,12 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
+
+
+
+        //-------------------------------------------------------------------------------
+        //  INICIO Y ATENCIÓN DE CONEXIONES
+        //-------------------------------------------------------------------------------
         private async Task AtenderClienteAsync(TcpClient cliente)
         {
             StreamWriter? writer = null;
@@ -111,9 +126,15 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
-        //  DESPACHO
-    
 
+
+
+        //-------------------------------------------------------------------------------
+        //  PROCESAMIENTO DE MENSAJES
+        //-------------------------------------------------------------------------------
+
+        // Centraliza el despacho de mensajes recibidos.
+        // El servidor valida el origen de la solicitud y delega la lógica a Juego.
         private async Task ProcesarMensajeAsync(MensajeBase mensaje, StreamWriter writer)
         {
             string accion = mensaje.Accion;
@@ -126,7 +147,8 @@ namespace MonopolyServidor.Comunicacion
                     resultado = ProcesarConexion(mensaje, writer);
                     break;
 
-                //  acciones del jugador en turno (deben venir de SU conexión) 
+                // Las acciones asociadas a un jugador solo se aceptan desde la conexión
+                // registrada para ese mismo jugador.
                 case Acciones.IniciarJuego:
                 case Acciones.TirarDados:
                 case Acciones.ComprarPropiedad:
@@ -136,7 +158,7 @@ namespace MonopolyServidor.Comunicacion
                     if (!EsConexionDelJugador(mensaje, writer))
                     {
                         await EnviarAsync(writer, CrearError(accion, mensaje.JugadorId, CodigosError.JugadorNoEncontrado,
-                            "Esta conexión no corresponde a ese jugador."));
+                        "Esta conexión no corresponde a ese jugador."));
                         return;
                     }
                     int id = mensaje.JugadorId!.Value;
@@ -151,7 +173,8 @@ namespace MonopolyServidor.Comunicacion
                     };
                     break;
 
-                //  mensajes que solo acepta desde la Raspberry 
+                // Estas acciones son exclusivas del hardware registrado.
+                // Un cliente normal no puede simular lecturas RFID ni pulsaciones del botón.
                 case Acciones.RfidDetectado:
                 case Acciones.BotonPresionado:
                     if (!ReferenceEquals(writer, hardwareWriter))
@@ -189,6 +212,8 @@ namespace MonopolyServidor.Comunicacion
                     resultado.NotificarEstado = false;
                     break;
 
+
+                // cualquier otra accion es un error
                 default:
                     resultado = ResultadoAccion.Error(CodigosError.AccionInvalida, $"La acción {accion} no es válida.");
                     break;
@@ -199,15 +224,20 @@ namespace MonopolyServidor.Comunicacion
                 await EnviarAsync(writer, CrearRespuesta(accion, mensaje.JugadorId, resultado));
             }
 
+            // Propaga a los clientes y al hardware los eventos generados por Juego.
+            // ServidorTcp únicamente transporta estos resultados; no genera reglas de juego.
             if (resultado.Exito)
             {
                 await DifundirAsync(resultado);
             }
         }
-
-    //  CONEXIÓN / REGISTRO
         
 
+
+
+        //-------------------------------------------------------------------------------
+        //  CONEXIÓN Y REGISTRO
+        //-------------------------------------------------------------------------------
         private ResultadoAccion ProcesarConexion(MensajeBase mensaje, StreamWriter writer)
         {
             // ¿Es la Raspberry?
@@ -295,10 +325,14 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
-       //  RFID
+
+
+        //-------------------------------------------------------------------------------
+        //  RFID Y HARDWARE
+        //-------------------------------------------------------------------------------
         private async Task<ResultadoAccion> ProcesarVincularRfidAsync(int jugadorId)
         {
-            if (hardwareWriter == null)
+            if (hardwareWriter == null) //si no hay hardware no se procesa RFID
                 return ResultadoAccion.Error(CodigosError.AccionInvalida, "No hay hardware RFID conectado.");
 
             ResultadoAccion resultado = juego.SolicitarVinculacionRfid(jugadorId);
@@ -325,10 +359,12 @@ namespace MonopolyServidor.Comunicacion
             Console.WriteLine($"RFID detectado: {datosRfid.UID}");
             return juego.ProcesarRfid(datosRfid.UID);
         }
+        
 
-        // =====================================================================
+
+        //-------------------------------------------------------------------------------
         //  CONSULTAS
-        // =====================================================================
+        //-------------------------------------------------------------------------------
 
         // Datos opcionales: { "FiltroJugadorId": 2, "Tipo": "PagoAlquiler", "DesdeInicio": false }
         private ResultadoAccion ProcesarConsultarTransacciones(MensajeBase mensaje)
@@ -339,8 +375,7 @@ namespace MonopolyServidor.Comunicacion
 
             if (mensaje.Datos is JsonElement datos && datos.ValueKind == JsonValueKind.Object)
             {
-                if (datos.TryGetProperty("FiltroJugadorId", out JsonElement j) && j.ValueKind == JsonValueKind.Number)
-                    filtroJugador = j.GetInt32();
+                if (datos.TryGetProperty("FiltroJugadorId", out JsonElement j) && j.ValueKind == JsonValueKind.Number)filtroJugador = j.GetInt32();
 
                 if (datos.TryGetProperty("Tipo", out JsonElement t) && t.ValueKind == JsonValueKind.String)
                 {
@@ -360,9 +395,11 @@ namespace MonopolyServidor.Comunicacion
             return r;
         }
 
-        // =====================================================================
-        //  ENVÍO
-        // =====================================================================
+
+
+        //-------------------------------------------------------------------------------
+        //  ENVÍO Y NOTIFICACIONES
+        //-------------------------------------------------------------------------------
 
         // Después de cada acción exitosa: eventos -> todos, dados/pagos -> hardware, estado -> todos.
         private async Task DifundirAsync(ResultadoAccion resultado)
@@ -401,6 +438,7 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
+
         private async Task EnviarATodosAsync(MensajeBase mensaje)
         {
             for (int i = 0; i < conexionesJugadores.Length; i++)
@@ -415,6 +453,7 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
+        // Pantilla para enviar mensajes al hardware
         private async Task<bool> EnviarAHardwareAsync(string accion, int? jugadorId, object? datos)
         {
             if (hardwareWriter == null) return false;
@@ -427,7 +466,7 @@ namespace MonopolyServidor.Comunicacion
                 Datos = datos != null ? JsonSerializer.SerializeToElement(datos, opcionesJson) : null
             };
 
-            if (await EnviarAsync(hardwareWriter, mensaje)) return true;
+            if (await EnviarAsync(hardwareWriter, mensaje)) return true;//si no contesta, no hay hardware
 
             hardwareWriter = null;
             Console.WriteLine("Se perdió la conexión con el hardware.");
@@ -449,6 +488,7 @@ namespace MonopolyServidor.Comunicacion
             }
         }
 
+        // Pantilla para respuestas
         private RespuestaMensaje CrearRespuesta(string accion, int? jugadorId, ResultadoAccion resultado)
         {
             if (!resultado.Exito)
@@ -465,6 +505,7 @@ namespace MonopolyServidor.Comunicacion
             };
         }
 
+        // Pantilla para mensajes de error
         private RespuestaMensaje CrearError(string accion, int? jugadorId, string codigo, string descripcion)
         {
             return new RespuestaMensaje
