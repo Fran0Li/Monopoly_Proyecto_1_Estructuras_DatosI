@@ -261,6 +261,12 @@ namespace MonopolyServidor.Comunicacion
                 if (jugador == null)
                     return ResultadoAccion.Error(CodigosError.JugadorNoEncontrado, "El jugador indicado no está registrado.");
 
+                // Durante o después de una partida, un jugador eliminado no puede reconectarse.
+                if (juego.Estado != EstadoJuego.Esperando && !jugador.activo)
+                {
+                    return ResultadoAccion.Error(CodigosError.JugadorEliminado,"El jugador fue eliminado de la partida y no puede reconectarse.");
+                }
+
                 conexionesJugadores[id - 1] = writer;
                 Console.WriteLine($"Jugador reconectado: {jugador.nombre} - ID: {id}");
                 ResultadoAccion r = ResultadoAccion.Ok($"Jugador {jugador.nombre} reconectado correctamente.");
