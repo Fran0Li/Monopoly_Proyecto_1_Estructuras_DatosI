@@ -58,6 +58,20 @@ public class ListaCircularDoble<T>
     {
         return nodoActual.Anterior!;//devuelve el nodo que esta antes del actual
     }
+    //Devuelve el primer elemento y lo manda al final de la lista.
+    //En una lista circular basta con mover la cabeza al siguiente nodo: O(1).
+    //Se usa para el mazo de cartas (la carta usada pasa al final).
+    public T TomarPrimeroYEnviarAlFinal()
+    {
+        if (cabeza == null)
+        {
+            throw new InvalidOperationException("La lista está vacía.");
+        }
+        T valor = cabeza.Valor;
+        cabeza = cabeza.Siguiente!;
+        return valor;
+    }
+
     public IEnumerable<T> Recorrer()
     {
         if (cabeza == null)yield break;  //si no hay cabeza, termina la ejecucion

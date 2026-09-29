@@ -40,6 +40,10 @@ namespace MonopolyCliente.Comunicacion
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
 
+        // Solo un envío a la vez: si se hacen dos clics rápidos, el segundo espera
+        // (dos escrituras simultáneas en el mismo StreamWriter lanzan excepción).
+        private readonly SemaphoreSlim candadoEscritura = new SemaphoreSlim(1, 1);
+
         /// Id que el servidor asigna a este jugador al conectarse. Es null
         /// hasta que llega la respuesta de CONECTAR con Exito = true.
         /// Se usa automáticamente en cada petición siguiente (ver
@@ -88,7 +92,7 @@ namespace MonopolyCliente.Comunicacion
             // que llegue un \n completo, aunque el TCP lo entregue partido
             // en varios paquetes. Por eso el protocolo exige NDJSON.
             reader = new StreamReader(stream, Encoding.UTF8);
-            writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+            writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true }; // UTF-8 sin BOM
 
             // El loop de lectura corre en paralelo (fire-and-forget) porque
             // el servidor puede mandarnos Notificaciones en cualquier
@@ -129,7 +133,15 @@ namespace MonopolyCliente.Comunicacion
             };
 
             string json = JsonSerializer.Serialize(peticion, opcionesJson);
-            await writer.WriteLineAsync(json);
+            await candadoEscritura.WaitAsync();
+            try
+            {
+                await writer.WriteLineAsync(json);
+            }
+            finally
+            {
+                candadoEscritura.Release();
+            }
         }
 
 
@@ -171,8 +183,16 @@ namespace MonopolyCliente.Comunicacion
         /// misma forma (Respuesta agrega Exito y Mensaje).
         private void ProcesarLinea(string linea)
         {
-            using JsonDocument doc = JsonDocument.Parse(linea);
-            string tipoMensaje = doc.RootElement.GetProperty("TipoMensaje").GetString() ?? "";
+            string tipoMensaje;
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(linea);
+                tipoMensaje = doc.RootElement.GetProperty("TipoMensaje").GetString() ?? "";
+            }
+            catch (Exception) // línea mal formada: se ignora sin cortar la conexión
+            {
+                return;
+            }
 
             if (tipoMensaje == TiposMensaje.Respuesta)
             {
@@ -181,10 +201,7 @@ namespace MonopolyCliente.Comunicacion
 
                 // Si es la confirmación de CONECTAR y salió bien, guardamos
                 // el JugadorId para usarlo automáticamente en las próximas
-                // peticiones. OJO: el servidor todavía no asigna un id real
-                // acá (ver nota en el chat) — por ahora esto puede seguir
-                // guardando null, y está bien así hasta que se complete
-                // ProcesarConexion del lado servidor.
+                // peticiones. El servidor lo manda en el sobre (JugadorId).
                 if (respuesta.Accion == Acciones.Conectar && respuesta.Exito && respuesta.JugadorId.HasValue)
                 {
                     JugadorId = respuesta.JugadorId;

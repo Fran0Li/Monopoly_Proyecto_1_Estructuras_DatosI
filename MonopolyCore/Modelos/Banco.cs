@@ -20,7 +20,7 @@ namespace MonopolyCore
         }
 
         // Permite consultar cuántas transacciones se han registrado.
-        public int CantidadTransacciones
+        public int CantidadTransacciones 
         {
             get { return historial.GetCantidad(); }
         }

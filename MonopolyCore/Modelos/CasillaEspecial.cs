@@ -1,17 +1,44 @@
 namespace MonopolyCore.Modelos {
-public class CasillaEspecial : Casilla
+public class CasillaEspecial : Casilla //hereda de la clase Casilla
 {
-    private TipoCasillaEspecial tipoespecial;
-
-    public TipoCasillaEspecial TipoEspecial
+    private TipoCasillaEspecial tipoespecial; //tipo de casilla especial
+    public TipoCasillaEspecial TipoEspecial // getter y setter del tipo de casilla especial
     {
         get { return tipoespecial; }
         set { tipoespecial = value; }
     }
-    public CasillaEspecial(int id, string nombre, int posicion, TipoCasillaEspecial tipoespecial)
+    private int monto; //solo se usa en Impuesto
+
+    public int Monto
+    {
+        get { return monto; }
+        set { monto = value; }
+    }
+    //constructor de la clase CasillaEspecial, recibe el id, nombre, posicion, tipo de la casilla especial y monto (solo Impuesto)
+    public CasillaEspecial(int id, string nombre, int posicion, TipoCasillaEspecial tipoespecial, int monto = 0)
         : base(id, nombre, posicion, TipoCasilla.Especial)
     {
         this.tipoespecial = tipoespecial;
+        this.monto = monto;
+    }
+
+    public override void AlCaer(Jugador jugador, Juego juego)
+    {
+        switch (tipoespecial)
+        {
+            case TipoCasillaEspecial.IrACarcel:
+                juego.EnviarACarcel(jugador);
+                break;
+            case TipoCasillaEspecial.Impuesto:
+                juego.CobrarObligatorio(jugador, null, monto, TipoTransaccion.PagoAlBanco, $"Impuesto: {Nombre}");
+                break;
+            case TipoCasillaEspecial.Carcel:
+                juego.Informar(jugador, $"{jugador.nombre} está de visita en la cárcel.");
+                break;
+            default: //Inicio (el premio se cobra al pasar) y ParqueoGratis no hacen nada
+                juego.Informar(jugador, $"{jugador.nombre} cayó en {Nombre}.");
+                break;
+        }
     }
 }
 }

@@ -30,6 +30,40 @@ namespace MonopolyCore.Comunicacion
         public const string VincularRfid = "VINCULAR_RFID";
         public const string EsperarRfid = "ESPERAR_RFID";
         public const string RfidVinculado = "RFID_VINCULADO";
+
+        // Acciones extra de consulta
+        public const string ExportarTransacciones = "EXPORTAR_TRANSACCIONES";
+
+        // Notificaciones que el servidor manda a todos después de cada acción importante
+        public const string JugadorConectado = "JUGADOR_CONECTADO";
+        public const string JuegoIniciado = "JUEGO_INICIADO";
+        public const string EstadoActualizado = "ESTADO_ACTUALIZADO";
+        public const string JugadorMovido = "JUGADOR_MOVIDO";
+        public const string CompraDisponible = "COMPRA_DISPONIBLE";
+        public const string PropiedadComprada = "PROPIEDAD_COMPRADA";
+        public const string PagoPendiente = "PAGO_PENDIENTE";
+        public const string PagoRealizado = "PAGO_REALIZADO";
+        public const string CartaTomada = "CARTA_TOMADA";
+        public const string TurnoCambiado = "TURNO_CAMBIADO";
+        public const string TurnoPerdido = "TURNO_PERDIDO";
+        public const string JugadorEliminado = "JUGADOR_ELIMINADO";
+        public const string FinJuego = "FIN_JUEGO";
+        public const string MensajeJuego = "MENSAJE_JUEGO";
+    }
+
+    // Movido desde Program.cs del servidor: Juego (en Core) también necesita estos códigos
+    public static class CodigosError
+    {
+        public const string FueraDeTurno = "FUERA_DE_TURNO";
+        public const string SaldoInsuficiente = "SALDO_INSUFICIENTE";
+        public const string PropiedadYaVendida = "PROPIEDAD_YA_VENDIDA";
+        public const string DadosYaLanzados = "DADOS_YA_LANZADOS";
+        public const string JugadorNoEncontrado = "JUGADOR_NO_ENCONTRADO";
+        public const string AccionInvalida = "ACCION_INVALIDA";
+        public const string JugadorEliminado = "JUGADOR_ELIMINADO";
+        public const string PagoPendiente = "PAGO_PENDIENTE";
+        public const string JuegoNoIniciado = "JUEGO_NO_INICIADO";
+        public const string MensajeInvalido = "MENSAJE_INVALIDO";
     }
 
     public class MensajeBase
