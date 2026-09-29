@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\MonopolyCore\MonopolyCore.csproj" />
@@ -11,5 +11,10 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+
+  <!-- Imágenes opcionales del tablero: todo lo que esté en la carpeta Imagenes se copia junto al .exe -->
+  <ItemGroup>
+    <None Include="Imagenes\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
 </Project>
