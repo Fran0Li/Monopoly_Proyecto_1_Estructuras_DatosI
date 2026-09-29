@@ -339,15 +339,15 @@ public Juego(int saldoInicial = 1500, int premioPorInicio = 200, int maxTurnos =
                 IniciarAccion();
 
                 if (Estado != EstadoJuego.EnCurso) //Si no hay partida en curso no lo elimina
-                    return Error(CodigosError.AccionInvalida,"No hay una partida en curso.");
+                    return Error(CodigosError.AccionInvalida, "No hay una partida en curso.");
 
                 Jugador? jugador = ObtenerJugador(jugadorId);
 
                 if (jugador == null) //Si no existe el jugador
-                    return Error(CodigosError.JugadorNoEncontrado,"El jugador indicado no existe.");
+                    return Error(CodigosError.JugadorNoEncontrado, "El jugador indicado no existe.");
 
                 if (!jugador.activo) //Si no esta activo
-                    return Error(CodigosError.JugadorEliminado,"El jugador ya estaba eliminado.");
+                    return Error(CodigosError.JugadorEliminado, "El jugador ya estaba eliminado.");
 
                 // Se guarda antes de quitarlo de la cola para saber si debemos
                 // comenzar inmediatamente el turno del siguiente jugador.
@@ -364,6 +364,14 @@ public Juego(int saldoInicial = 1500, int premioPorInicio = 200, int maxTurnos =
                     jugadorEsperandoVinculacion = null;
                 }
 
+                // Si el jugador que abandona participa en un pago pendiente,
+                // se cancela para evitar pagos hacia o desde un jugador eliminado.
+                if (pagoPendiente != null && (ReferenceEquals(pagoPendiente.Deudor, jugador) || ReferenceEquals(pagoPendiente.Acreedor, jugador)))
+                {
+                    pagoPendiente = null;
+                }
+
+
                 // Si abandonó durante su turno, cualquier acción pendiente de ese
                 // turno se descarta para evitar que la partida quede bloqueada.
                 if (eraSuTurno)
@@ -372,6 +380,7 @@ public Juego(int saldoInicial = 1500, int premioPorInicio = 200, int maxTurnos =
                     pagoPendiente = null;
                     dadosLanzados = false;
                 }
+            
 
                 Emitir(
                     Acciones.JugadorEliminado,
@@ -861,8 +870,9 @@ public Juego(int saldoInicial = 1500, int premioPorInicio = 200, int maxTurnos =
                 return true;
             }
 
-            // Caso raro (no debería pasar: solo paga el jugador en turno). Se rota hasta él, se elimina
-            // y se vuelve al jugador que tenía el turno.
+            // Si el jugador eliminado no tiene el turno actual, se rota la cola
+            // hasta encontrarlo, se elimina y luego se restaura el jugador
+            // que tenía originalmente el turno.
             for (int i = 0; i < turnos.Size && !ReferenceEquals(turnos.Actual(), jugador); i++) turnos.AvanzarTurno(); // rota hasta el jugador
             if (ReferenceEquals(turnos.Actual(), jugador)) turnos.EliminarActual();
             for (int i = 0; i < turnos.Size && !ReferenceEquals(turnos.Actual(), actual); i++) turnos.AvanzarTurno(); // vuelve al turno original
