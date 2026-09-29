@@ -154,6 +154,7 @@ def mostrar_resultado_tarjeta(exito):
 
 from mfrc522 import MFRC522
 lector = MFRC522(sck=18, mosi=19, miso=16, rst=20, cs=17)
+buzzer = Pin(22, Pin.OUT)
 
 ultimo_uid_enviado = None
 
@@ -173,6 +174,9 @@ def revisar_rfid(sock):
                 }
                 enviar_mensaje(sock, mensaje)
                 ultimo_uid_enviado = uid_str
+                buzzer.value(1)
+                time.sleep(0.3)
+                buzzer.value(0)
     else:
         ultimo_uid_enviado = None
 
