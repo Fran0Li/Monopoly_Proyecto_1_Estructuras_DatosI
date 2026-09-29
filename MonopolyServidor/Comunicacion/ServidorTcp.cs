@@ -295,28 +295,58 @@ namespace MonopolyServidor.Comunicacion
             return ReferenceEquals(conexionesJugadores[id - 1], writer);
         }
 
+        // Limpia una conexión que se cerró.
+        // Si pertenecía a un jugador durante una partida, la desconexión se considera
+        // abandono y Juego se encarga de retirarlo de la cola de turnos.
         private async Task LimpiarConexionAsync(StreamWriter? writer)
         {
             if (writer == null) return;
 
             await candado.WaitAsync();
+
             try
             {
+                int? jugadorDesconectadoId = null;
+
+                // Busca si la conexión pertenecía a algún jugador.
                 for (int i = 0; i < conexionesJugadores.Length; i++)
                 {
                     if (ReferenceEquals(conexionesJugadores[i], writer))
                     {
                         conexionesJugadores[i] = null;
-                        Console.WriteLine($"Jugador {i + 1} sin conexión (puede reconectarse con su ID).");
+                        jugadorDesconectadoId = i + 1;
+
+                        Console.WriteLine($"Jugador {jugadorDesconectadoId} desconectado.");
+                        break;
                     }
                 }
 
+                // Juego decide si la desconexión implica abandonar la partida.
+                if (jugadorDesconectadoId.HasValue)
+                {
+                    ResultadoAccion resultado = juego.AbandonarJugador(jugadorDesconectadoId.Value);
+
+                    if (resultado.Exito)
+                    {
+                        Console.WriteLine(resultado.Mensaje);
+
+                        // Informa a los jugadores restantes de la eliminación,
+                        // cambio de turno o finalización de la partida.
+                        await DifundirAsync(resultado);
+                    }
+                }
+
+                // Si la conexión perdida era la Raspberry, se desactiva el uso
+                // de RFID para pagos y se informa el nuevo estado.
                 if (ReferenceEquals(hardwareWriter, writer))
                 {
                     hardwareWriter = null;
+
                     Console.WriteLine("Se perdió la conexión con el hardware: pagos sin RFID.");
-                    ResultadoAccion r = juego.DesactivarRfid();
-                    await DifundirAsync(r);
+
+                    ResultadoAccion resultadoHardware = juego.DesactivarRfid();
+
+                    await DifundirAsync(resultadoHardware);
                 }
             }
             finally
