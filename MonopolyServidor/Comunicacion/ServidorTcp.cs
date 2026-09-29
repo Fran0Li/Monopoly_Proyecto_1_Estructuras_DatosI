@@ -25,8 +25,8 @@ namespace MonopolyServidor.Comunicacion
 
         private readonly Juego juego;
 
-        // Configuración de la partida (ajustable para la demo).
-        // minJugadores: 4 para la defensa; 2 sirve para probar con menos compus.
+        // Mantiene la conexión asociada a cada jugador.
+        // El índice del arreglo corresponde al ID del jugador menos uno.
         private readonly StreamWriter?[] conexionesJugadores = new StreamWriter?[Juego.MaxJugadores];
         private StreamWriter? hardwareWriter;
 
@@ -375,7 +375,10 @@ namespace MonopolyServidor.Comunicacion
 
             if (mensaje.Datos is JsonElement datos && datos.ValueKind == JsonValueKind.Object)
             {
-                if (datos.TryGetProperty("FiltroJugadorId", out JsonElement j) && j.ValueKind == JsonValueKind.Number)filtroJugador = j.GetInt32();
+                if (datos.TryGetProperty("FiltroJugadorId", out JsonElement j) && j.ValueKind == JsonValueKind.Number)
+                {
+                    filtroJugador = j.GetInt32();
+                }
 
                 if (datos.TryGetProperty("Tipo", out JsonElement t) && t.ValueKind == JsonValueKind.String)
                 {

@@ -329,6 +329,84 @@ public Juego(int saldoInicial = 1500, int premioPorInicio = 200, int maxTurnos =
             }
         }
 
+        // Desconexión durante una partida: se considera abandono y elimina al jugador.
+        // No se utiliza EliminarJugador porque ese método representa una quiebra y puede
+        // realizar movimientos de dinero. En un abandono solo se retira al jugador.
+        public ResultadoAccion AbandonarJugador(int jugadorId)
+        {
+            lock (candado)
+            {
+                IniciarAccion();
+
+                if (Estado != EstadoJuego.EnCurso) //Si no hay partida en curso no lo elimina
+                    return Error(CodigosError.AccionInvalida,"No hay una partida en curso.");
+
+                Jugador? jugador = ObtenerJugador(jugadorId);
+
+                if (jugador == null) //Si no existe el jugador
+                    return Error(CodigosError.JugadorNoEncontrado,"El jugador indicado no existe.");
+
+                if (!jugador.activo) //Si no esta activo
+                    return Error(CodigosError.JugadorEliminado,"El jugador ya estaba eliminado.");
+
+                // Se guarda antes de quitarlo de la cola para saber si debemos
+                // comenzar inmediatamente el turno del siguiente jugador.
+                bool eraSuTurno = ReferenceEquals(turnos.Actual(), jugador);
+
+                // El jugador deja oficialmente la partida.
+                jugador.LiberarPropiedades();
+                jugador.activo = false;
+                jugador.turnosEnCarcel = 0;
+
+                // Si estaba esperando vincular una tarjeta RFID, se cancela.
+                if (jugadorEsperandoVinculacion == jugador.id)
+                {
+                    jugadorEsperandoVinculacion = null;
+                }
+
+                // Si abandonó durante su turno, cualquier acción pendiente de ese
+                // turno se descarta para evitar que la partida quede bloqueada.
+                if (eraSuTurno)
+                {
+                    compraPendiente = null;
+                    pagoPendiente = null;
+                    dadosLanzados = false;
+                }
+
+                Emitir(
+                    Acciones.JugadorEliminado,
+                    jugador.id,
+                    $"{jugador.nombre} se desconectó y quedó fuera de la partida.",
+                    new
+                    {
+                        JugadorId = jugador.id,
+                        Nombre = jugador.nombre,
+                        Motivo = "Desconexion"
+                    }
+                );
+
+                // Lo elimina de la cola circular de turnos.
+                QuitarDeLaCola(jugador);
+
+                // Si queda un único jugador activo, gana automáticamente.
+                if (turnos.Size <= 1)
+                {
+                    Finalizar(turnos.EstaVacia() ? null : turnos.Actual(),"Único jugador activo");
+
+                    return Ok($"{jugador.nombre} abandonó la partida. La partida finalizó.");
+                }
+
+                // Si era el jugador actual, EliminarActual ya dejó la cola apuntando
+                // al siguiente. No se debe avanzar otra vez.
+                if (eraSuTurno)
+                {
+                    IniciarSiguienteTurno(avanzarCola: false);
+                }
+
+                return Ok($"{jugador.nombre} abandonó la partida.");
+            }
+        }
+
         // RFID
 
         // Paso 1 de la vinculación: el servidor luego manda ESPERAR_RFID al hardware.
