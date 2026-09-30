@@ -25,7 +25,9 @@ public enum TipoEfectoEvento
     SalirDeCarcelGratis,
     Retroceder,
     IrACasilla,
-    PerderTurno
+    PerderTurno,
+    PagarATodos,
+    CobrarATodos
 }
 
 public enum TipoTransaccion

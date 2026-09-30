@@ -55,6 +55,8 @@ namespace MonopolyCore
                 new CartaEvento(8, "Se te quemó la Raspy:( : paga 120", TipoEfectoEvento.PerderDinero, 120),
                 new CartaEvento(9, "Te atraparon copiando: ve a Curso Repetido", TipoEfectoEvento.IrACarcel, 0),
                 new CartaEvento(10, "Te cancelaron una clase: ve al Parqueo del TEC", TipoEfectoEvento.IrACasilla, 12),
+                new CartaEvento(11, "Es tu cumpleaños: cada jugador te paga 20", TipoEfectoEvento.CobrarATodos, 20),
+                new CartaEvento(12, "Invitás a todos a la soda: pagás 10 a cada jugador", TipoEfectoEvento.PagarATodos, 10),
             };
 
             //Se barajan una vez al crear la partida (Fisher-Yates sobre el arreglo)

@@ -65,6 +65,12 @@ public class CartaEvento
             case TipoEfectoEvento.IrACarcel:
                 juego.EnviarACarcel(jugador);
                 break;
+            case TipoEfectoEvento.PagarATodos:
+                juego.PagarATodos(jugador, cantidad, descripcion);
+                break;
+            case TipoEfectoEvento.CobrarATodos:
+                juego.CobrarATodos(jugador, cantidad, descripcion);
+                break;
             case TipoEfectoEvento.SalirDeCarcelGratis:
                 jugador.turnosEnCarcel = 0;
                 juego.Informar(jugador, $"{jugador.nombre} ya no pierde turnos.");

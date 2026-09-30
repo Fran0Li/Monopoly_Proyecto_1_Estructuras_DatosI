@@ -486,8 +486,7 @@ namespace MonopolyServidor.Comunicacion
                 if (writer == null) continue;
                 if (!await EnviarAsync(writer, mensaje))
                 {
-                    conexionesJugadores[i] = null;
-                    Console.WriteLine($"No se pudo notificar al jugador {i + 1}.");
+                    Console.WriteLine($"No se pudo notificar al jugador {i + 1}.");// no se borra aquí: LimpiarConexionAsync lo hace y llama AbandonarJugador
                 }
             }
         }

@@ -760,6 +760,39 @@ public Juego(int saldoInicial = 1500, int premioPorInicio = 200, int maxTurnos =
             });
         }
 
+        // Carta: el jugador le paga 'monto' a cada uno de los demás jugadores activos (automático, sin RFID)
+        internal void PagarATodos(Jugador jugador, int monto, string descripcion)
+        {
+            for (int i = 0; i < cantidadJugadores; i++)
+            {
+                Jugador otro = jugadores[i]!;
+                if (ReferenceEquals(otro, jugador) || !otro.activo) continue;
+                if (jugador.saldo < monto) // no le alcanza: regla de eliminación
+                {
+                    EliminarJugador(jugador, otro, TipoTransaccion.PagoEntreJugadores, descripcion, monto);
+                    return;
+                }
+                EjecutarPago(jugador, otro, monto, TipoTransaccion.PagoEntreJugadores, descripcion);
+            }
+        }
+
+        // Carta: cada uno de los demás jugadores activos le paga 'monto' al jugador (automático, sin RFID)
+        internal void CobrarATodos(Jugador jugador, int monto, string descripcion)
+        {
+            for (int i = 0; i < cantidadJugadores; i++)
+            {
+                Jugador otro = jugadores[i]!;
+                if (ReferenceEquals(otro, jugador) || !otro.activo) continue;
+                if (otro.saldo < monto) // al otro no le alcanza: queda eliminado
+                {
+                    EliminarJugador(otro, jugador, TipoTransaccion.PagoEntreJugadores, descripcion, monto);
+                    if (Estado == EstadoJuego.Finalizado) return;
+                    continue;
+                }
+                EjecutarPago(otro, jugador, monto, TipoTransaccion.PagoEntreJugadores, descripcion);
+            }
+        }
+
         internal void HacerPerderTurnos(Jugador jugador, int cantidad)
         {
             jugador.turnosEnCarcel += cantidad; // se descuentan en IniciarSiguienteTurno
